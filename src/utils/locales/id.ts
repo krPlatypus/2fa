@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "Kode disalin — tempel ke kolom",
   "quickFill.manual": "Kode Anda: {0}",
   "quickFill.openApp": "Buka ekstensi untuk memilih akun",
+  "quickFill.pickSite": "Akun mana untuk situs ini?",
   "share.title": "Bagikan kode",
   "share.intro": "Tautan yang menampilkan kode terkini akun ini selama {0}. Kunci rahasia Anda tidak ada di dalamnya — hanya kode untuk waktu itu, dan tidak ada setelahnya.",
   "share.label": "Nama yang tampil di atas kode",

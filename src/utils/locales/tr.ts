@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "Kod kopyalandı — alana yapıştırın",
   "quickFill.manual": "Kodunuz: {0}",
   "quickFill.openApp": "Hesap seçmek için uzantıyı açın",
+  "quickFill.pickSite": "Bu site için hangi hesap?",
   "share.title": "Kodları paylaş",
   "share.intro": "Bu hesabın canlı kodlarını {0} boyunca gösteren bir bağlantı. Gizli anahtarınız içinde yok — yalnızca o süreye ait kodlar, sonrasında hiçbir şey.",
   "share.label": "Kodun üstünde görünen ad",

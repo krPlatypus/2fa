@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "Code gekopieerd — plak hem in het veld",
   "quickFill.manual": "Jouw code: {0}",
   "quickFill.openApp": "Open de extensie om een account te kiezen",
+  "quickFill.pickSite": "Welk account voor deze site?",
   "share.title": "Codes delen",
   "share.intro": "Een link die gedurende {0} de actuele codes van dit account laat zien. Je geheime sleutel zit er niet in — alleen de codes voor die tijd, en daarna niets.",
   "share.label": "Naam boven de code",

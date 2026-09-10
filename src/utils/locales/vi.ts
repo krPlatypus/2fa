@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "Đã sao chép mã — hãy dán vào ô",
   "quickFill.manual": "Mã của bạn: {0}",
   "quickFill.openApp": "Mở tiện ích để chọn tài khoản",
+  "quickFill.pickSite": "Tài khoản nào cho trang này?",
   "share.title": "Chia sẻ mã",
   "share.intro": "Một liên kết hiển thị mã hiện tại của tài khoản này trong {0}. Khóa bí mật của bạn không nằm trong đó — chỉ có mã cho khoảng thời gian ấy, và không có gì sau đó.",
   "share.label": "Tên hiển thị phía trên mã",

@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "코드를 복사했습니다 — 입력란에 붙여넣으세요",
   "quickFill.manual": "코드: {0}",
   "quickFill.openApp": "확장 프로그램을 열어 계정을 선택하세요",
+  "quickFill.pickSite": "이 사이트에 사용할 계정은?",
   "share.title": "코드 공유",
   "share.intro": "이 계정의 현재 코드를 {0} 동안 보여 주는 링크입니다. 비밀 키는 들어 있지 않습니다. 그 시간 동안의 코드뿐이고, 그 뒤로는 아무것도 없습니다.",
   "share.label": "코드 위에 표시할 이름",

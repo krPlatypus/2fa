@@ -41,7 +41,7 @@ import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/uti
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
-import { isQuickFillEnabled, setQuickFillEnabled } from '@/utils/quick-fill';
+import { isQuickFillEnabled, peekPickPrompt, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
 import {
@@ -151,6 +151,7 @@ function App() {
   const [openMode, setOpenModeState] = useState<OpenMode>('popup');
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
+  const [pickSite, setPickSite] = useState<string | null>(null);
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   const [showPromoBanner, setShowPromoBanner] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
@@ -758,6 +759,18 @@ function App() {
     getSuggestedAccountId(currentDomain, accounts).then(setSuggestedAccountId);
   }, [currentDomain, accounts, suggestionsOn]);
 
+  // Quick fill sends people here when it will not fill by itself, and the site
+  // it was asked about is the one thing this window cannot work out on its own:
+  // the tab under a lookalike domain is the active tab either way, and a
+  // suggestion pinned to the top of the list reads as an endorsement of it.
+  // So the question gets asked in words, with the address written out.
+  //
+  // Peeked, not consumed. The answer is whichever account gets copied next,
+  // and AccountCard is what spends the question on it.
+  useEffect(() => {
+    peekPickPrompt().then(setPickSite);
+  }, []);
+
   // Nothing renders until we know whether there is a vault: the alternative is
   // a flash of either the account list or the "no accounts yet" empty state,
   // and on a 2FA app the latter reads as "my accounts are gone".
@@ -1235,6 +1248,18 @@ function App() {
           )
         ) : (
           <div className="bg-white dark:bg-dark-800 pb-20">
+            {pickSite && (
+              <div className="px-4 py-2.5 bg-gray-50 dark:bg-dark-900/60 border-b border-gray-200 dark:border-dark-700">
+                <div className="text-[11px] text-gray-500 dark:text-gray-400">{t('quickFill.pickSite')}</div>
+                {/* The hostname as the browser normalised it, not the base
+                    domain the matching runs on: `login.example.com.evil.tld`
+                    and an internationalised lookalike both have to be readable
+                    as what they are, and URL gives back punycode for the
+                    second. Whole, wrapped, and in the weight of a heading —
+                    this line is the entire point of the strip. */}
+                <div className="text-[13px] font-medium text-gray-900 dark:text-gray-100 break-all">{pickSite}</div>
+              </div>
+            )}
             {suggestedAccount && (
               <>
                 {/* AccountCard must stay the last child so its own `last:after:hidden`

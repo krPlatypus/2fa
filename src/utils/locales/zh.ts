@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "验证码已复制 — 请粘贴到输入框",
   "quickFill.manual": "你的验证码：{0}",
   "quickFill.openApp": "打开扩展以选择账户",
+  "quickFill.pickSite": "此网站使用哪个账户？",
   "share.title": "分享验证码",
   "share.intro": "这个链接会在 {0} 内显示此账户的实时验证码。链接里没有你的密钥——只有这段时间内的验证码，之后的一个也没有。",
   "share.label": "显示在验证码上方的名称",

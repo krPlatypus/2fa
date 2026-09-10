@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "コードをコピーしました — 入力欄に貼り付けてください",
   "quickFill.manual": "コード: {0}",
   "quickFill.openApp": "拡張機能を開いてアカウントを選んでください",
+  "quickFill.pickSite": "このサイトにはどのアカウント？",
   "share.title": "コードを共有",
   "share.intro": "このアカウントのコードを{0}のあいだ表示するリンクです。シークレットキーは含まれません。入っているのはその時間分のコードだけで、それ以降のものはありません。",
   "share.label": "コードの上に表示する名前",

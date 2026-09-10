@@ -194,6 +194,7 @@ type TranslationKeys = {
   'quickFill.copied': string;
   'quickFill.manual': string;
   'quickFill.openApp': string;
+  'quickFill.pickSite': string;
 
   // Edit account
   'edit.title': string;

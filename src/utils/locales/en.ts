@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "Code copied — paste it into the field",
   "quickFill.manual": "Your code: {0}",
   "quickFill.openApp": "Open the extension to pick an account",
+  "quickFill.pickSite": "Which account for this site?",
   "share.title": "Share codes",
   "share.intro": "A link that shows live codes for this account for {0}. Your secret key is not in it — only the codes for that time, and nothing after.",
   "share.label": "Name shown above the code",

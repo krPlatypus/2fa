@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "Koden är kopierad – klistra in den i fältet",
   "quickFill.manual": "Din kod: {0}",
   "quickFill.openApp": "Öppna tillägget för att välja ett konto",
+  "quickFill.pickSite": "Vilket konto för den här webbplatsen?",
   "share.title": "Dela koder",
   "share.intro": "En länk som visar kontots aktuella koder i {0}. Din hemliga nyckel finns inte i den – bara koderna för den tiden, och inget därefter.",
   "share.label": "Namn som visas ovanför koden",

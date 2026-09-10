@@ -66,6 +66,39 @@ export async function notePickPrompt(hostname: string): Promise<void> {
     .catch(() => {});
 }
 
+async function storedPrompt(): Promise<PickPrompt | null> {
+  if (!hasSessionStorage()) return null;
+  try {
+    const stored = (await chrome.storage.session.get(PROMPT_KEY))[PROMPT_KEY] as PickPrompt | undefined;
+    return stored ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the question is still open.
+ *
+ * An unusable stamp — a clock wound back between the two — fails closed: an
+ * unearned boost is exactly what this whole mechanism exists to avoid.
+ */
+function isOpen(prompt: PickPrompt): boolean {
+  const age = ageOf(prompt.at);
+  return age !== null && age <= PROMPT_MAX_AGE_MS;
+}
+
+/**
+ * The site an open question is about, for the popup to name above the list.
+ *
+ * Read without consuming. Naming the site is not an answer to the question —
+ * the answer is whichever account the user goes on to pick, and that is what
+ * takePickPrompt below spends the question on.
+ */
+export async function peekPickPrompt(): Promise<string | null> {
+  const stored = await storedPrompt();
+  return stored && isOpen(stored) ? stored.hostname : null;
+}
+
 /**
  * Was the account about to be copied an answer to that question?
  *
@@ -74,18 +107,10 @@ export async function notePickPrompt(hostname: string): Promise<void> {
  * anything more about the site.
  */
 export async function takePickPrompt(hostname: string): Promise<boolean> {
-  if (!hostname || !hasSessionStorage()) return false;
-  try {
-    const stored = (await chrome.storage.session.get(PROMPT_KEY))[PROMPT_KEY] as PickPrompt | undefined;
-    if (!stored) return false;
+  if (!hostname) return false;
+  const stored = await storedPrompt();
+  if (!stored) return false;
 
-    await chrome.storage.session.remove(PROMPT_KEY).catch(() => {});
-
-    // An unusable stamp — a clock wound back between the two — fails closed:
-    // an unearned boost is exactly what this whole mechanism exists to avoid.
-    const age = ageOf(stored.at);
-    return stored.hostname === hostname && age !== null && age <= PROMPT_MAX_AGE_MS;
-  } catch {
-    return false;
-  }
+  await chrome.storage.session.remove(PROMPT_KEY).catch(() => {});
+  return stored.hostname === hostname && isOpen(stored);
 }

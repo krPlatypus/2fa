@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "تم نسخ الرمز — الصقه في الحقل",
   "quickFill.manual": "رمزك: {0}",
   "quickFill.openApp": "افتح الإضافة لاختيار حساب",
+  "quickFill.pickSite": "أي حساب لهذا الموقع؟",
   "share.title": "مشاركة الرموز",
   "share.intro": "رابط يعرض رموز هذا الحساب مباشرةً لمدة {0}. لا يحتوي على مفتاحك السري — فقط رموز تلك المدة، ولا شيء بعدها.",
   "share.label": "الاسم الظاهر فوق الرمز",

@@ -309,6 +309,7 @@ const strings: TranslationStrings = {
   "quickFill.copied": "Kod skopiowany — wklej go do pola",
   "quickFill.manual": "Twój kod: {0}",
   "quickFill.openApp": "Otwórz rozszerzenie, aby wybrać konto",
+  "quickFill.pickSite": "Które konto dla tej witryny?",
   "share.title": "Udostępnij kody",
   "share.intro": "Link, który przez {0} pokazuje bieżące kody tego konta. Nie ma w nim tajnego klucza — tylko kody na ten czas i nic więcej.",
   "share.label": "Nazwa wyświetlana nad kodem",
