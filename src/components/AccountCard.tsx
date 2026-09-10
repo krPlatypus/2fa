@@ -438,84 +438,98 @@ export function AccountCard({
   // Normal mode
   return (
     <div {...dragProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
-      <div className="flex items-start justify-between mb-1.5">
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {showIcon && <AccountIcon account={account} size={20} iconUrl={iconUrl} />}
-          <TruncatedName
-            label={fullName}
-            className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
-          />
-          {suggestedBadge}
-          {groupBadge}
-          {draggable && (
-            <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
-              <GripVertical size={14} />
+      {/* One row: the icon on the left, the name and the code stacked beside
+          it, the ring on the right. The icon used to sit inline with the name,
+          which left the code beginning at the card edge underneath it and made
+          the icon read as part of the title rather than as the account.
+
+          32px because that is the size an uploaded picture is stored at, so it
+          draws one pixel to one and never softens. Anything larger would be an
+          upscale of a 32x32 PNG. */}
+      <div className="flex items-center gap-3">
+        {showIcon && <AccountIcon account={account} size={32} iconUrl={iconUrl} />}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between mb-1.5">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <TruncatedName
+                label={fullName}
+                className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
+              />
+              {suggestedBadge}
+              {groupBadge}
+              {draggable && (
+                <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
+                  <GripVertical size={14} />
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => onShare(account)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            title={t('share.title')}
-          >
-            <Share2 size={13} />
-          </button>
-          <button
-            onClick={() => onEdit(account)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            title={t('edit.title')}
-          >
-            <Pencil size={13} />
-          </button>
-          <button
-            onClick={() => onDelete(account.id)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
-            title={t('accounts.deleteAccount')}
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <button
-          onClick={handleCopy}
-          onPointerDown={startRipple}
-          className="flex-1 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-dark-700 rounded-lg p-1.5 -m-1.5 transition-colors group/copy relative overflow-hidden"
-        >
-          {rippleNode}
-          {/* dir="ltr" is load-bearing, not tidiness. The code is drawn in
-              groups of three separated by a space, and under RTL the bidi
-              algorithm resolves that neutral space to the paragraph direction:
-              "123 456" lays out with 456 to the LEFT of 123, so an Arabic user
-              reading the screen left to right types 456123 and is refused. Copy
-              was never affected — it writes the raw digits — so this only ever
-              bit the read-and-type path, which is the one people use when the
-              code is going into a phone, a VPN client or an SSH prompt. */}
-          <div
-            dir="ltr"
-            className={`font-otp text-2xl tracking-wide transition-colors ${codeColour}`}
-          >
-            {codeDigits}
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => onShare(account)}
+                className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                title={t('share.title')}
+              >
+                <Share2 size={13} />
+              </button>
+              <button
+                onClick={() => onEdit(account)}
+                className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                title={t('edit.title')}
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                onClick={() => onDelete(account.id)}
+                className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
+                title={t('accounts.deleteAccount')}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
           </div>
-          {/* Sits directly after the digits rather than pushed to the far right:
-              the icon belongs to the code it copies, and across the width of the
-              card it read as an unrelated control. The label goes after the icon
-              so appearing does not shove the icon sideways. */}
-          <div className="flex items-center gap-2">
-            <CopyState copied={copied} size={16} />
-            {copied && (
-              <span className="copied-in text-xs font-medium text-green-600 dark:text-green-400">
-                {t('accounts.copied')}
-              </span>
-            )}
-          </div>
-        </button>
 
-        <div className="ms-2">
-          <ProgressRing remaining={totp.remaining} period={totp.period} />
+          <div className="flex items-center justify-between">
+            <button
+              onClick={handleCopy}
+              onPointerDown={startRipple}
+              className="flex-1 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-dark-700 rounded-lg p-1.5 -m-1.5 transition-colors group/copy relative overflow-hidden"
+            >
+              {rippleNode}
+              {/* dir="ltr" is load-bearing, not tidiness. The code is drawn in
+                  groups of three separated by a space, and under RTL the bidi
+                  algorithm resolves that neutral space to the paragraph direction:
+                  "123 456" lays out with 456 to the LEFT of 123, so an Arabic user
+                  reading the screen left to right types 456123 and is refused. Copy
+                  was never affected — it writes the raw digits — so this only ever
+                  bit the read-and-type path, which is the one people use when the
+                  code is going into a phone, a VPN client or an SSH prompt. */}
+              <div
+                dir="ltr"
+                className={`font-otp text-2xl tracking-wide transition-colors ${codeColour}`}
+              >
+                {codeDigits}
+              </div>
+              {/* Sits directly after the digits rather than pushed to the far right:
+                  the icon belongs to the code it copies, and across the width of the
+                  card it read as an unrelated control. The label goes after the icon
+                  so appearing does not shove the icon sideways. */}
+              <div className="flex items-center gap-2">
+                <CopyState copied={copied} size={16} />
+                {copied && (
+                  <span className="copied-in text-xs font-medium text-green-600 dark:text-green-400">
+                    {t('accounts.copied')}
+                  </span>
+                )}
+              </div>
+            </button>
+
+          </div>
         </div>
+
+        {/* Outside the code row, so it centres against both lines rather than
+            hanging off the end of one. */}
+        <ProgressRing remaining={totp.remaining} period={totp.period} />
       </div>
     </div>
   );

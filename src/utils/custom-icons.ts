@@ -44,11 +44,18 @@ export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
  */
 const MAX_ICON_BYTES = 16 * 1024;
 
+/** How one group is drawn on its chip. Both halves are optional. */
+export interface GroupStyle {
+  /** A name from GROUP_ICONS, not an index — see components/group-icons.tsx. */
+  icon?: string;
+  /** Hex. Absent means the one derived from the group's own name. */
+  color?: string;
+}
+
 export interface IconStore {
   /** Account id to a 32x32 PNG data URL. */
   accounts: Record<string, string>;
-  /** Group name to a lucide icon name. */
-  groups: Record<string, string>;
+  groups: Record<string, GroupStyle>;
 }
 
 /**
@@ -70,12 +77,25 @@ function isSealed(value: unknown): value is { enc: EncryptedPayload } {
   return !!value && typeof (value as { enc?: unknown }).enc === 'string';
 }
 
-/** A stored value read back as a store, copied rather than aliased. */
+/**
+ * A stored value read back as a store, copied rather than aliased.
+ *
+ * A group entry used to be the icon name on its own, before it grew a colour.
+ * Anything written in that form is read as one — two lines here rather than a
+ * migration pass, and the next write puts it in the current shape.
+ */
 function shape(value: unknown): IconStore {
   const store = (value ?? {}) as Partial<IconStore>;
+  const groups: Record<string, GroupStyle> = {};
+  if (store.groups && typeof store.groups === 'object') {
+    for (const [name, entry] of Object.entries(store.groups)) {
+      if (typeof entry === 'string') groups[name] = { icon: entry };
+      else if (entry && typeof entry === 'object') groups[name] = { ...(entry as GroupStyle) };
+    }
+  }
   return {
     accounts: store.accounts && typeof store.accounts === 'object' ? { ...store.accounts } : {},
-    groups: store.groups && typeof store.groups === 'object' ? { ...store.groups } : {},
+    groups,
   };
 }
 
@@ -151,14 +171,30 @@ export async function setAccountIcon(accountId: string, dataUrl: string | null):
   });
 }
 
-/** Set or clear the lucide icon for one group. */
-export async function setGroupIcon(group: string, iconName: string | null): Promise<void> {
+/** Change one half of a group's style; null clears that half. */
+async function styleGroup(group: string, patch: GroupStyle): Promise<void> {
   const name = group.trim();
   if (!name) return;
   await update(store => {
-    if (iconName) store.groups[name] = iconName;
+    const next = { ...store.groups[name], ...patch };
+    if (!next.icon) delete next.icon;
+    if (!next.color) delete next.color;
+    // An entry with neither half left is the group having no style at all,
+    // which is the absence of a key rather than an empty object sitting in the
+    // store for every group anyone ever opened the picker on.
+    if (next.icon || next.color) store.groups[name] = next;
     else delete store.groups[name];
   });
+}
+
+/** Set or clear the icon for one group. */
+export async function setGroupIcon(group: string, iconName: string | null): Promise<void> {
+  await styleGroup(group, { icon: iconName ?? undefined });
+}
+
+/** Set or clear the colour for one group; cleared means derived from the name. */
+export async function setGroupColor(group: string, color: string | null): Promise<void> {
+  await styleGroup(group, { color: color ?? undefined });
 }
 
 /**
@@ -254,4 +290,45 @@ export async function fileToIcon(file: Blob): Promise<string> {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/**
+ * Fold icons out of a backup file into the store.
+ *
+ * Everything here arrives from a file on disk, so nothing is trusted: a data
+ * URL has to look like one and fit the same budget a fresh upload does, a
+ * colour has to be six hex digits, and an icon name is length-capped rather
+ * than checked against the list — an unknown name already draws as no icon
+ * (see groupIcon), so the only thing worth stopping is an unbounded string.
+ *
+ * The file wins where both have an entry. Restoring a backup is a deliberate
+ * act, and the alternative — keeping whatever is here — makes a restore that
+ * quietly does nothing.
+ */
+export async function mergeCustomIcons(incoming: Partial<IconStore> | null | undefined): Promise<void> {
+  if (!incoming) return;
+  const clean = shape(incoming);
+
+  const accounts: Record<string, string> = {};
+  for (const [id, dataUrl] of Object.entries(clean.accounts)) {
+    if (typeof dataUrl !== 'string') continue;
+    if (!dataUrl.startsWith('data:image/')) continue;
+    if (dataUrl.length > MAX_ICON_BYTES) continue;
+    accounts[id] = dataUrl;
+  }
+
+  const groups: Record<string, GroupStyle> = {};
+  for (const [name, style] of Object.entries(clean.groups)) {
+    const entry: GroupStyle = {};
+    if (typeof style.icon === 'string' && style.icon.length <= 32) entry.icon = style.icon;
+    if (typeof style.color === 'string' && /^#[0-9a-f]{6}$/i.test(style.color)) entry.color = style.color;
+    if (entry.icon || entry.color) groups[name] = entry;
+  }
+
+  if (Object.keys(accounts).length === 0 && Object.keys(groups).length === 0) return;
+
+  await update(store => {
+    Object.assign(store.accounts, accounts);
+    Object.assign(store.groups, groups);
+  });
 }

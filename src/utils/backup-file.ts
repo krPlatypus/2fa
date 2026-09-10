@@ -6,6 +6,7 @@
 // derived straight from a password chosen at export time.
 
 import type { Account } from '@/types';
+import type { IconStore } from './custom-icons';
 import { buildOTPAuthURL } from './qr-parser';
 import { isUsableSecret } from './totp';
 import {
@@ -19,6 +20,26 @@ import {
 } from './crypto';
 
 const ENCRYPTED_FORMAT = 'authenticator-encrypted-backup';
+
+/**
+ * What comes out of a backup file.
+ *
+ * `icons` is absent in every file written before they existed, and in every
+ * file from another authenticator, so it is optional everywhere it is read.
+ */
+export interface BackupContents {
+  accounts: Account[];
+  icons?: IconStore;
+}
+
+/**
+ * The sealed payload of an encrypted export.
+ *
+ * It used to be the accounts array on its own. Files in that shape are still
+ * out there — the whole point of this format is that it opens years later —
+ * so the reader accepts both and only the writer moved on.
+ */
+type EncryptedPayload = Account[] | BackupContents;
 
 interface EncryptedBackupFile {
   format: typeof ENCRYPTED_FORMAT;
@@ -38,20 +59,48 @@ export class WrongExportPasswordError extends Error {
   }
 }
 
-export function buildPlainBackupFile(accounts: Account[]): string {
+export function buildPlainBackupFile(accounts: Account[], icons?: IconStore): string {
   return JSON.stringify(
     {
       version: '2.0',
       exportDate: new Date().toISOString(),
       accountCount: accounts.length,
       accounts,
+      // Left out entirely when there are none, so a file from someone who never
+      // set an icon looks exactly as it did before.
+      ...(hasIcons(icons) ? { icons } : {}),
     },
     null,
     2
   );
 }
 
-export async function buildEncryptedBackupFile(accounts: Account[], password: string): Promise<string> {
+function hasIcons(icons: IconStore | undefined): icons is IconStore {
+  return !!icons && (Object.keys(icons.accounts).length > 0 || Object.keys(icons.groups).length > 0);
+}
+
+/**
+ * The icons out of a plain backup file, if it carries any.
+ *
+ * Separate from importAccounts, which parses the same text for the accounts:
+ * the icons are applied by a different store and a file that has none — every
+ * file from another app, and every one of ours written before this — is the
+ * normal case rather than a failure.
+ */
+export function iconsFromPlainBackup(text: string): IconStore | undefined {
+  try {
+    const parsed = JSON.parse(text) as { icons?: IconStore };
+    return parsed && typeof parsed === 'object' ? parsed.icons : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function buildEncryptedBackupFile(
+  accounts: Account[],
+  password: string,
+  icons?: IconStore
+): Promise<string> {
   const salt = newSalt();
   const key = await deriveKeyFromPassword(password, salt);
 
@@ -62,7 +111,7 @@ export async function buildEncryptedBackupFile(accounts: Account[], password: st
     iterations: PBKDF2_ITERATIONS,
     salt: toBase64(salt),
     exportDate: new Date().toISOString(),
-    data: await encryptJson(accounts, key),
+    data: await encryptJson(hasIcons(icons) ? { accounts, icons } : { accounts }, key),
   };
 
   return JSON.stringify(file, null, 2);
@@ -76,18 +125,22 @@ export function isEncryptedBackupFile(text: string): boolean {
   }
 }
 
-export async function readEncryptedBackupFile(text: string, password: string): Promise<Account[]> {
+export async function readEncryptedBackupFile(text: string, password: string): Promise<BackupContents> {
   const file = JSON.parse(text) as EncryptedBackupFile;
   if (file.format !== ENCRYPTED_FORMAT) {
     throw new Error('Not an encrypted backup file');
   }
 
   const key = await deriveKeyFromPassword(password, fromBase64(file.salt), file.iterations);
+  let payload: EncryptedPayload;
   try {
-    return await decryptJson<Account[]>(file.data, key);
+    payload = await decryptJson<EncryptedPayload>(file.data, key);
   } catch {
     throw new WrongExportPasswordError();
   }
+
+  // The bare array is what every file written before icons existed holds.
+  return Array.isArray(payload) ? { accounts: payload } : payload;
 }
 
 /**
