@@ -50,7 +50,7 @@ export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
         <span
-          className={`font-mono font-semibold ${size < 32 ? 'text-[10px]' : 'text-xs'} ${
+          className={`font-otp font-semibold ${size < 32 ? 'text-[10px]' : 'text-xs'} ${
             isLowTime ? 'text-red-500' : 'text-gray-600 dark:text-gray-400'
           }`}
         >

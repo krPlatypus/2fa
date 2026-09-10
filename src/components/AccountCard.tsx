@@ -176,7 +176,28 @@ export function AccountCard({
 
   const groupBadge = groupBadgeFor(false);
 
-  const formattedCode = totp ? totp.code.match(/.{1,3}/g)?.join(' ') || totp.code : '';
+  /**
+   * The code in groups of three, held apart by a margin rather than a space.
+   *
+   * A space is as wide as the font decides — around a quarter of an em — and
+   * `tracking-wide` widens it again on top, which left most of a digit's worth
+   * of air in the middle of a six-digit code and read as two numbers instead of
+   * one. 0.16em is a seam rather than a gap: enough to group the halves, not
+   * enough to split them.
+   *
+   * It also removes the last bidi-neutral character from between the digits.
+   * The space used to resolve to the paragraph direction under RTL and lay
+   * "123 456" out with 456 first — see the `dir="ltr"` below, which is what
+   * caught it. With nothing neutral left in there, there is nothing to
+   * resolve.
+   */
+  const codeDigits = totp
+    ? (totp.code.match(/.{1,3}/g) ?? [totp.code]).map((group, index) => (
+        <span key={index} className={index > 0 ? 'ms-[0.16em]' : undefined}>
+          {group}
+        </span>
+      ))
+    : null;
   const isExpiringSoon = totp ? totp.remaining <= 5 : false;
 
   const dragProps = {
@@ -345,13 +366,13 @@ export function AccountCard({
             {groupBadgeFor(true)}
             <span
               dir="ltr"
-              className={`ms-auto flex-shrink-0 font-mono text-base tracking-wide transition-colors ${
+              className={`ms-auto flex-shrink-0 font-otp text-base tracking-wide transition-colors ${
                 isExpiringSoon
                   ? 'text-orange-600 dark:text-orange-400 animate-pulse'
                   : 'text-[#4285F4]'
               }`}
             >
-              {formattedCode}
+              {codeDigits}
             </span>
             <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
               {copied ? (
@@ -455,13 +476,13 @@ export function AccountCard({
               code is going into a phone, a VPN client or an SSH prompt. */}
           <div
             dir="ltr"
-            className={`font-mono text-2xl tracking-wide transition-colors ${
+            className={`font-otp text-2xl tracking-wide transition-colors ${
               isExpiringSoon
                 ? 'text-orange-600 dark:text-orange-400 animate-pulse'
                 : 'text-[#4285F4]'
             }`}
           >
-            {formattedCode}
+            {codeDigits}
           </div>
           {/* Sits directly after the digits rather than pushed to the far right:
               the icon belongs to the code it copies, and across the width of the
