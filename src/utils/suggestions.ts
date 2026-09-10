@@ -185,6 +185,21 @@ export async function getSuggestedAccountId(hostname: string, accounts: Account[
   return used.copyRank[0] || null;
 }
 
+/**
+ * Whether this account is already in use on the page of some other domain.
+ *
+ * Site uses only. A copy carries the hostname of whatever tab happened to be
+ * open — a VPN code going into a desktop client, an SSH prompt — so counting
+ * copies would let an unrelated tab decide that an account belongs somewhere
+ * and refuse it everywhere else.
+ */
+async function usedOnOtherDomain(accountId: string, domain: string): Promise<boolean> {
+  const usage = await getUsageMap();
+  return Object.entries(usage).some(
+    ([other, entries]) => other !== domain && readEntry(entries[accountId]).s > 0
+  );
+}
+
 /** How a fill candidate was arrived at, weakest last. */
 export type SuggestionSource = 'history' | 'text';
 
@@ -203,6 +218,9 @@ export interface FillCandidate {
  * these forms submit themselves on the last digit, spending one of the few
  * attempts the service allows.
  *
+ * The name match carries one more condition here than it does in the popup,
+ * for the reason below.
+ *
  * Returning null is not a failure. It means "ask", and the caller opens the
  * popup — where whatever the user picks is recorded as evidence about the
  * site, so the same question is not asked twice.
@@ -215,7 +233,24 @@ export async function getFillCandidate(hostname: string, accounts: Account[]): P
   if (used.site) return { accountId: used.site, source: 'history' };
 
   const matches = textMatches(domain, accounts);
-  return matches.length === 1 ? { accountId: matches[0].id, source: 'text' } : null;
+  if (matches.length !== 1) return null;
+
+  // A name is matched as a substring, and `github` sits inside
+  // `github-login.com` exactly as it sits inside `github.com`. Good enough to
+  // put a highlight on a card, not good enough to type a code into a page
+  // nobody has typed it into before: an account already in use on some page
+  // has a domain, and any other domain is the odd one out. The odd one out is
+  // asked about instead of filled — the popup opens, and typing the code by
+  // hand was the alternative all along.
+  //
+  // TOTP has no origin to bind to, so this is not a phishing defence and
+  // cannot be made into one. It only takes away the silent path.
+  //
+  // An account with no site use yet is filled on the name as before. That is
+  // the first sign-in, where there is nothing to be the odd one out from.
+  if (await usedOnOtherDomain(matches[0].id, domain)) return null;
+
+  return { accountId: matches[0].id, source: 'text' };
 }
 
 /** The domain to match on, or null when there is nothing to match against. */
