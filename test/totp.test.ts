@@ -481,4 +481,32 @@ export async function run(): Promise<void> {
     check('so does a missing one', u(15, undefined) === 'warning');
     check('an unusable remaining is calm, not critical', u(NaN) === 'calm');
   }
+
+  scenario('Which brand mark an issuer gets');
+  {
+    const brands = await import('@/utils/brand-icons');
+    const mark = (issuer: string | undefined | null) => brands.brandFor(issuer)?.title ?? null;
+
+    check('an exact issuer matches', mark('GitHub') === 'GitHub');
+    check('spelling and punctuation are normalised', mark('Google LLC') === 'Google' && mark('google-llc') === 'Google');
+    check('a known alias resolves', mark('Twitter') === 'X' && mark('Jira') === 'Atlassian');
+    check('a longer name falls back to its prefix', mark('GitHub Enterprise') === 'GitHub');
+
+    // Prefix matching has a floor, or a one-letter alias claims everything that
+    // starts with it. X is exactly that case.
+    check('X still matches on its own', mark('X') === 'X');
+    check('but does not swallow every issuer starting with it', mark('Xero') === null);
+
+    check('an unknown issuer gets nothing', mark('Some Internal Tool') === null);
+    check('and so does an empty or missing one', mark('') === null && mark(undefined) === null && mark(null) === null);
+
+    // Every mark has to be drawable in both themes. A near-black brand colour
+    // on a dark card is the case this guards.
+    const all = Object.values(brands.BRAND_ICONS);
+    check('the pack is not empty', all.length > 20, String(all.length));
+    check('every mark has one path and two colours', all.every(b =>
+      b.path.length > 0 && /^#[0-9a-f]{6}$/.test(b.light) && /^#[0-9a-f]{6}$/.test(b.dark)));
+    check('near-black marks get a light substitute', brands.BRAND_ICONS.github.dark !== brands.BRAND_ICONS.github.light);
+    check('and a coloured one keeps its colour', brands.BRAND_ICONS.dropbox.dark === brands.BRAND_ICONS.dropbox.light);
+  }
 }

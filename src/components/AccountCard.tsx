@@ -5,6 +5,7 @@ import { colorForKey } from '@/utils/qr-parser';
 import { accountLabel } from '@/utils/account-label';
 import { useTOTP } from '@/hooks/useTOTP';
 import { codeUrgency } from '@/utils/totp';
+import { brandFor, type BrandIcon } from '@/utils/brand-icons';
 import { createT, type Language } from '@/utils/i18n';
 import { recordAccountUsage } from '@/utils/suggestions';
 import { takePickPrompt } from '@/utils/quick-fill';
@@ -47,17 +48,14 @@ function CopyState({ copied, size }: { copied: boolean; size: number }) {
 }
 
 /**
- * A coloured initial.
+ * The mark beside an account: a brand logo where one is recognised, the
+ * coloured initial where it is not.
  *
- * The colour is not new: `generateRandomColor` has stamped one onto every
- * account on every import path since the beginning, storage has carried it, and
- * nothing has ever drawn it. This is that field finally reaching the screen.
- *
- * Deliberately not a favicon. Fetching those means one network request per
- * service, which tells whoever answers it exactly which sites this user holds
- * 2FA for — and the popup's rule is that it makes no network requests at all.
- * An initial says nothing to anyone, needs no permission, costs no bytes, and
- * works for every account rather than only for the recognised ones.
+ * Still no favicons. Fetching one per service would tell whoever answers
+ * exactly which sites this user holds 2FA for, and the popup makes no network
+ * request to render. The logos are inlined single-path SVGs instead, and the
+ * initial is what every unrecognised account keeps — see utils/brand-icons.ts
+ * for what is in the pack and what its owners have had removed from it.
  */
 /**
  * Black or white, whichever the background can actually carry.
@@ -85,7 +83,29 @@ function readableInk(background: string): string {
   return luminance > 0.28 ? '#000000' : '#ffffff';
 }
 
-function Avatar({ account, size }: { account: Account; size: number }) {
+/**
+ * One brand mark, drawn bare rather than inside a circle.
+ *
+ * The colour arrives as two custom properties and the fill picks between them
+ * per theme, which is cheaper than mounting the path twice under `dark:hidden`
+ * and does not need this component to know what theme it is in.
+ */
+function BrandMark({ brand, size }: { brand: BrandIcon; size: number }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      style={{ '--brand': brand.light, '--brand-dark': brand.dark } as CSSProperties}
+      className="flex-shrink-0 [fill:var(--brand)] dark:[fill:var(--brand-dark)]"
+    >
+      <path d={brand.path} />
+    </svg>
+  );
+}
+
+function Initial({ account, size }: { account: Account; size: number }) {
   const issuer = typeof account.issuer === 'string' ? account.issuer : '';
   const name = typeof account.name === 'string' ? account.name : '';
   const source = (issuer || name || '?').trim();
@@ -104,6 +124,12 @@ function Avatar({ account, size }: { account: Account; size: number }) {
   );
 }
 
+/** Brand mark if the issuer is one we ship, otherwise the initial. */
+function AccountIcon({ account, size }: { account: Account; size: number }) {
+  const brand = brandFor(account.issuer);
+  return brand ? <BrandMark brand={brand} size={size} /> : <Initial account={account} size={size} />;
+}
+
 interface AccountCardProps {
   account: Account;
   onDelete: (id: string) => void;
@@ -113,7 +139,7 @@ interface AccountCardProps {
   language: Language;
   viewMode?: ViewMode;
   /** Off by default — see the toggle in Settings and the note beside it. */
-  showAvatar?: boolean;
+  showIcon?: boolean;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent, id: string) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -132,7 +158,7 @@ export function AccountCard({
   onShare,
   language,
   viewMode = 'normal',
-  showAvatar = false,
+  showIcon = true,
   draggable,
   onDragStart,
   onDragOver,
@@ -359,7 +385,7 @@ export function AccountCard({
             className="relative flex-1 min-w-0 flex items-center gap-2 text-start rounded-lg overflow-hidden group/copy"
           >
             {rippleNode}
-            {showAvatar && <Avatar account={account} size={18} />}
+            {showIcon && <AccountIcon account={account} size={18} />}
             <TruncatedName
               label={fullName}
               className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
@@ -436,7 +462,7 @@ export function AccountCard({
             className="relative flex-1 min-w-0 flex items-center gap-1.5 text-start rounded-lg overflow-hidden group/copy"
           >
             {rippleNode}
-            {showAvatar && <Avatar account={account} size={18} />}
+            {showIcon && <AccountIcon account={account} size={18} />}
             {/* min-w-0: a flex item will not shrink below its content without
                 it, so a long name would push the code off the row instead of
                 truncating. */}
@@ -495,7 +521,7 @@ export function AccountCard({
     <div {...dragProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
       <div className="flex items-start justify-between mb-1.5">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {showAvatar && <Avatar account={account} size={20} />}
+          {showIcon && <AccountIcon account={account} size={20} />}
           <TruncatedName
             label={fullName}
             className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"

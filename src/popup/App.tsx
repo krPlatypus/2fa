@@ -144,7 +144,7 @@ function App() {
   // forty-five rows is a change to it whether or not they wanted one — in the
   // compact row it also costs the account name 24px of the width this release
   // just spent getting back.
-  const [showAvatars, setShowAvatars] = useState(false);
+  const [showAvatars, setShowAvatars] = useState(true);
   // Seeded from the synchronous mirror so the window opens at the chosen size
   // instead of resizing once chrome.storage answers.
   const [popupSize, setPopupSize] = useState<PopupSize>(cachedPopupSize);
@@ -177,7 +177,10 @@ function App() {
       if (result.darkMode) {
         setDarkMode(true);
       }
-      setShowAvatars(result.showAvatars === true);
+      // On unless switched off. It was off by default when it could only draw a
+      // letter; now the recognised services draw their own mark, which is what
+      // the list looked like it should have all along.
+      setShowAvatars(result.showAvatars !== false);
       if (result.viewMode) {
         setViewMode(result.viewMode);
       }
@@ -1282,7 +1285,7 @@ function App() {
                     onShare={setSharingAccount}
                     language={language}
                     viewMode={viewMode}
-                    showAvatar={showAvatars}
+                    showIcon={showAvatars}
                     draggable={false}
                     currentDomain={currentDomain}
                     // Same account, same badge: pinned at the top it was the one
@@ -1303,7 +1306,7 @@ function App() {
                 onShare={setSharingAccount}
                 language={language}
                 viewMode={viewMode}
-                showAvatar={showAvatars}
+                showIcon={showAvatars}
                 // handleDrop rewrites the order of the full list, so dragging
                 // inside a filtered view would reorder against indices the user
                 // cannot see. Off while filtered, as it already is while searching.
