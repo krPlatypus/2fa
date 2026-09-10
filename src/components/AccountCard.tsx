@@ -4,6 +4,7 @@ import type { Account } from '@/types';
 import { colorForKey } from '@/utils/qr-parser';
 import { accountLabel } from '@/utils/account-label';
 import { useTOTP } from '@/hooks/useTOTP';
+import { codeUrgency } from '@/utils/totp';
 import { createT, type Language } from '@/utils/i18n';
 import { recordAccountUsage } from '@/utils/suggestions';
 import { takePickPrompt } from '@/utils/quick-fill';
@@ -198,7 +199,16 @@ export function AccountCard({
         </span>
       ))
     : null;
-  const isExpiringSoon = totp ? totp.remaining <= 5 : false;
+  // Blue while there is time, amber under fifteen seconds, red under five —
+  // and the pulse held back for the red, so that the movement means "now" and
+  // not merely "soon". codeUrgency owns the thresholds; see utils/totp.ts.
+  const urgency = totp ? codeUrgency(totp.remaining, totp.period) : 'calm';
+  const codeColour =
+    urgency === 'critical'
+      ? 'text-red-500 dark:text-red-400 animate-pulse'
+      : urgency === 'warning'
+        ? 'text-amber-500 dark:text-amber-400'
+        : 'text-[#4285F4]';
 
   const dragProps = {
     draggable,
@@ -366,11 +376,7 @@ export function AccountCard({
             {groupBadgeFor(true)}
             <span
               dir="ltr"
-              className={`ms-auto flex-shrink-0 font-otp text-base tracking-wide transition-colors ${
-                isExpiringSoon
-                  ? 'text-orange-600 dark:text-orange-400 animate-pulse'
-                  : 'text-[#4285F4]'
-              }`}
+              className={`ms-auto flex-shrink-0 font-otp text-base tracking-wide transition-colors ${codeColour}`}
             >
               {codeDigits}
             </span>
@@ -476,11 +482,7 @@ export function AccountCard({
               code is going into a phone, a VPN client or an SSH prompt. */}
           <div
             dir="ltr"
-            className={`font-otp text-2xl tracking-wide transition-colors ${
-              isExpiringSoon
-                ? 'text-orange-600 dark:text-orange-400 animate-pulse'
-                : 'text-[#4285F4]'
-            }`}
+            className={`font-otp text-2xl tracking-wide transition-colors ${codeColour}`}
           >
             {codeDigits}
           </div>

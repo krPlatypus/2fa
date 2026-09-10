@@ -454,4 +454,31 @@ export async function run(): Promise<void> {
     if (result) accepted++;
   }
   check('none of 300 junk payloads parsed as an account', accepted === 0, `${accepted} accepted`);
+
+  scenario('How much of a hurry a code is in');
+  {
+    const u = (remaining: number, period: unknown = 30) => totp.codeUrgency(remaining, period);
+
+    check('a fresh 30-second code is calm', u(30) === 'calm' && u(16) === 'calm');
+    check('fifteen seconds left is a warning', u(15) === 'warning' && u(6) === 'warning');
+    check('five is critical, and so is nothing left', u(5) === 'critical' && u(0) === 'critical');
+
+    // The thresholds are capped against the period, not fixed. A 15-second
+    // account under a flat 15/5 would open every window already warning and
+    // spend a third of it critical — a warning that is the normal state.
+    check('a 15-second account still opens calm', u(15, 15) === 'calm' && u(8, 15) === 'calm');
+    check('and warns at half of its own period', u(7, 15) === 'warning');
+    check('and turns critical at a sixth', u(2, 15) === 'critical');
+
+    // Above 30 the caps bite instead, which is the point of them: a minute-long
+    // code has no reason to spend half a minute amber.
+    check('a 60-second code is calm at 16 seconds', u(16, 60) === 'calm');
+    check('and warns for the same last fifteen', u(15, 60) === 'warning' && u(6, 60) === 'warning');
+
+    // Records that carry a broken period reach this from storage, and a colour
+    // is not worth a thrown render.
+    check('a period of 0 falls back to 30', u(16, 0) === 'calm' && u(15, 0) === 'warning');
+    check('so does a missing one', u(15, undefined) === 'warning');
+    check('an unusable remaining is calm, not critical', u(NaN) === 'calm');
+  }
 }

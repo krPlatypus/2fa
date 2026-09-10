@@ -1,3 +1,5 @@
+import { codeUrgency } from '@/utils/totp';
+
 interface ProgressRingProps {
   remaining: number;
   period: number;
@@ -12,7 +14,16 @@ export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps
   const safePeriod = Number.isFinite(period) && period > 0 ? period : 30;
   const safeRemaining = Number.isFinite(remaining) ? remaining : safePeriod;
   const percentage = (safeRemaining / safePeriod) * 100;
-  const isLowTime = safeRemaining <= 5;
+  // Grey while there is time, then the same two steps the code itself takes.
+  // The thresholds are not repeated here — see codeUrgency in utils/totp.ts,
+  // which exists because they used to be.
+  const urgency = codeUrgency(safeRemaining, safePeriod);
+  const urgencyColour =
+    urgency === 'critical'
+      ? 'text-red-500 dark:text-red-400'
+      : urgency === 'warning'
+        ? 'text-amber-500 dark:text-amber-400'
+        : null;
   const center = size / 2;
   const radius = center - 4;
   // Derived from the radius the circle actually uses. It used to be computed
@@ -43,7 +54,7 @@ export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps
           strokeDasharray={circumference}
           strokeDashoffset={strokeDashoffset}
           className={`transition-all duration-1000 ${
-            isLowTime ? 'text-red-500' : 'text-gray-700 dark:text-gray-300'
+            urgencyColour ?? 'text-gray-700 dark:text-gray-300'
           }`}
           strokeLinecap="round"
         />
@@ -51,7 +62,7 @@ export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps
       <div className="absolute inset-0 flex items-center justify-center">
         <span
           className={`font-otp font-semibold ${size < 32 ? 'text-[10px]' : 'text-xs'} ${
-            isLowTime ? 'text-red-500' : 'text-gray-600 dark:text-gray-400'
+            urgencyColour ?? 'text-gray-600 dark:text-gray-400'
           }`}
         >
           {safeRemaining}
