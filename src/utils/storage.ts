@@ -19,6 +19,7 @@ import { replaceAllBackups, wipeAllBackups } from './auto-backup';
 import { isSyncEnabled, setSyncPreference } from './sync-preference';
 import { deletedHere, forgetDeleted, markDeleted } from './tombstones';
 import { cleanSecret } from './totp';
+import { sealCustomIcons, unsealCustomIcons } from './custom-icons';
 
 const STORAGE_KEY = 'authenticator_accounts';
 const SYNC_OVERFLOW_KEY = 'syncOverflow';
@@ -1138,6 +1139,11 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
     // Metadata the vault does not cover but a stolen profile would expose:
     // which services the user holds, and which group they filed them under.
     await chrome.storage.local.remove([USAGE_HISTORY_KEY, ACTIVE_GROUP_KEY]).catch(() => {});
+
+    // The chosen icons say the same thing — a Google logo on disk names the
+    // service as clearly as a usage record does — but they are work the user
+    // did, so they are sealed with this vault's key rather than wiped.
+    await sealCustomIcons(dataKey).catch(() => {});
   };
 
   return { recoveryCode, commit };
@@ -1199,6 +1205,12 @@ export async function disableVault(password: string): Promise<void> {
   await replaceAllBackups(unique).catch(error => {
     console.error('Could not replace the encrypted snapshots while turning the vault off:', error);
   });
+
+  // Before the key goes: the icons are sealed with it, and after clearVaultMeta
+  // there is nothing left to open them with. Best-effort like the snapshots
+  // above — an icon that stays sealed draws as an initial, which is a worse
+  // list and not a broken one.
+  await unsealCustomIcons(dataKey).catch(() => {});
 
   await clearVaultMeta();
   await lock();

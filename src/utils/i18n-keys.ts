@@ -199,6 +199,11 @@ type TranslationKeys = {
   // Edit account
   'edit.title': string;
   'edit.save': string;
+  'edit.icon': string;
+  'edit.iconChoose': string;
+  'edit.iconClear': string;
+  'edit.iconHint': string;
+  'edit.iconFailed': string;
 
   // Scan from screen
   'addAccount.scanFromScreen': string;

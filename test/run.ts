@@ -14,6 +14,7 @@ const suites = [
   ['vault', () => import('./vault.test')],
   ['data-loss', () => import('./dataloss.test')],
   ['suggestions', () => import('./suggestions.test')],
+  ['icons', () => import('./icons.test')],
   ['quick fill', () => import('./quick-fill.test')],
   ['quick fill in the page', () => import('./quick-fill-page.test')],
   ['groups', () => import('./groups.test')],

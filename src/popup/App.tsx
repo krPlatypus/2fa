@@ -41,6 +41,7 @@ import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/uti
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
+import { forgetAccountIcons, getCustomIcons, setAccountIcon, type IconStore } from '@/utils/custom-icons';
 import { isQuickFillEnabled, peekPickPrompt, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
@@ -152,6 +153,7 @@ function App() {
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
   const [pickSite, setPickSite] = useState<string | null>(null);
+  const [customIcons, setCustomIcons] = useState<IconStore>({ accounts: {}, groups: {} });
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   const [showPromoBanner, setShowPromoBanner] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
@@ -774,6 +776,35 @@ function App() {
     peekPickPrompt().then(setPickSite);
   }, []);
 
+  /**
+   * The icons the user chose, loaded here rather than per card.
+   *
+   * One read for the whole list: the store is a single key, so a card reading
+   * it would be twenty reads of the same object, and under a vault twenty
+   * decryptions of it.
+   *
+   * Reloaded when the list changes, which is also where stale entries get
+   * swept: the store is keyed by account id and a deleted account leaves its
+   * picture behind. Doing it here rather than in the delete handler means an
+   * account deleted on another surface is cleaned up too.
+   */
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      if (accounts.length > 0) await forgetAccountIcons(accounts.map(account => account.id)).catch(() => {});
+      const store = await getCustomIcons();
+      if (live) setCustomIcons(store);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [accounts]);
+
+  const handleIconChange = async (accountId: string, dataUrl: string | null) => {
+    await setAccountIcon(accountId, dataUrl);
+    setCustomIcons(await getCustomIcons());
+  };
+
   // Nothing renders until we know whether there is a vault: the alternative is
   // a flash of either the account list or the "no accounts yet" empty state,
   // and on a 2FA app the latter reads as "my accounts are gone".
@@ -1286,6 +1317,7 @@ function App() {
                     language={language}
                     viewMode={viewMode}
                     showIcon={showAvatars}
+                    iconUrl={customIcons.accounts[suggestedAccount.id]}
                     draggable={false}
                     currentDomain={currentDomain}
                     // Same account, same badge: pinned at the top it was the one
@@ -1307,6 +1339,7 @@ function App() {
                 language={language}
                 viewMode={viewMode}
                 showIcon={showAvatars}
+                iconUrl={customIcons.accounts[account.id]}
                 // handleDrop rewrites the order of the full list, so dragging
                 // inside a filtered view would reorder against indices the user
                 // cannot see. Off while filtered, as it already is while searching.
@@ -1381,6 +1414,8 @@ function App() {
           onSave={handleEditAccount}
           language={language}
           groups={groups.map(group => group.name)}
+          iconUrl={customIcons.accounts[editingAccount.id]}
+          onIconChange={(dataUrl) => handleIconChange(editingAccount.id, dataUrl)}
         />
       )}
 
