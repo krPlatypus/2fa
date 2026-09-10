@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type CSSProperties, type PointerEvent } from 'react';
 import { Copy, Check, Trash2, GripVertical, Pencil, Share2 } from 'lucide-react';
 import type { Account } from '@/types';
 import { colorForKey } from '@/utils/qr-parser';
@@ -12,6 +12,39 @@ import { ProgressRing } from './ProgressRing';
 import { TruncatedName } from './TruncatedName';
 
 export type ViewMode = 'normal' | 'compact' | 'hidden';
+
+/**
+ * The copy affordance and its acknowledgement, crossfaded rather than swapped.
+ *
+ * Both icons stay mounted, one over the other, and only opacity moves. The
+ * tick used to replace the clipboard outright, in the same frame the write
+ * returned — so the one moment the user is looking for confirmation was the
+ * one moment nothing appeared to happen. Three rows rendered that same ternary
+ * with three different sizes; this is the one place it lives now.
+ */
+function CopyState({ copied, size }: { copied: boolean; size: number }) {
+  return (
+    <span
+      className={`relative inline-flex flex-shrink-0 transition-opacity ${
+        copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'
+      }`}
+      style={{ width: size, height: size }}
+    >
+      <Copy
+        size={size}
+        className={`absolute inset-0 text-gray-400 dark:text-gray-500 transition-opacity duration-200 ${
+          copied ? 'opacity-0' : 'opacity-100'
+        }`}
+      />
+      <Check
+        size={size}
+        className={`absolute inset-0 text-green-600 dark:text-green-400 transition duration-200 ${
+          copied ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
+        }`}
+      />
+    </span>
+  );
+}
 
 /**
  * A coloured initial.
@@ -112,6 +145,34 @@ export function AccountCard({
   const t = createT(language);
   const totp = useTOTP(account);
   const [copied, setCopied] = useState(false);
+  const [ripple, setRipple] = useState<{ id: number; style: CSSProperties } | null>(null);
+
+  /**
+   * A circle that grows out of where the pointer landed.
+   *
+   * On pointerdown rather than on click, because the acknowledgement people
+   * read as "it heard me" has to land before the clipboard write resolves —
+   * that write is a promise, and on a denied or slow one there was previously
+   * nothing at all between the press and the tick.
+   *
+   * Sized to the diagonal so the circle covers the corner furthest from wherever
+   * it started, and cleared on animationend rather than a timer: the CSS owns
+   * the duration, and a timeout here would be a second copy of it to keep in
+   * step.
+   */
+  const startRipple = (event: PointerEvent<HTMLElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const size = Math.hypot(box.width, box.height) * 2;
+    setRipple({
+      id: Date.now(),
+      style: {
+        width: size,
+        height: size,
+        left: event.clientX - box.left - size / 2,
+        top: event.clientY - box.top - size / 2,
+      },
+    });
+  };
 
   const handleCopy = async () => {
     if (!totp) return;
@@ -136,6 +197,19 @@ export function AccountCard({
         .catch(() => {});
     }
   };
+
+  // Keyed on the press, so a second tap restarts the circle rather than
+  // letting the first one finish on its own. Only one row renders at a time,
+  // so one node serves all three.
+  const rippleNode = ripple ? (
+    <span
+      key={ripple.id}
+      aria-hidden="true"
+      onAnimationEnd={() => setRipple(null)}
+      className="copy-ripple pointer-events-none absolute rounded-full bg-[#4285F4]"
+      style={ripple.style}
+    />
+  ) : null;
 
   const suggestedBadge = isSuggested ? (
     <span className="flex-shrink-0 text-[10px] font-medium leading-none text-[#4285F4] bg-blue-50/70 dark:bg-blue-900/25 border border-blue-200/70 dark:border-blue-800/60 px-1.5 py-[3px] rounded-full">
@@ -281,8 +355,10 @@ export function AccountCard({
 
           <button
             onClick={handleCopy}
-            className="flex-1 min-w-0 flex items-center gap-2 text-start group/copy"
+            onPointerDown={startRipple}
+            className="relative flex-1 min-w-0 flex items-center gap-2 text-start rounded-lg overflow-hidden group/copy"
           >
+            {rippleNode}
             {showAvatar && <Avatar account={account} size={18} />}
             <TruncatedName
               label={fullName}
@@ -290,15 +366,9 @@ export function AccountCard({
             />
             {suggestedBadge}
             {groupBadgeFor(true)}
-            <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
-              {copied ? (
-                <Check size={14} className="text-green-600 dark:text-green-400" />
-              ) : (
-                <Copy size={14} className="text-gray-400 dark:text-gray-500" />
-              )}
-            </span>
+            <CopyState copied={copied} size={14} />
             {copied && (
-              <span className="flex-shrink-0 text-xs font-medium text-green-600 dark:text-green-400">
+              <span className="copied-in flex-shrink-0 text-xs font-medium text-green-600 dark:text-green-400">
                 {t('accounts.copied')}
               </span>
             )}
@@ -362,8 +432,10 @@ export function AccountCard({
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleCopy}
-            className="flex-1 min-w-0 flex items-center gap-1.5 text-start group/copy"
+            onPointerDown={startRipple}
+            className="relative flex-1 min-w-0 flex items-center gap-1.5 text-start rounded-lg overflow-hidden group/copy"
           >
+            {rippleNode}
             {showAvatar && <Avatar account={account} size={18} />}
             {/* min-w-0: a flex item will not shrink below its content without
                 it, so a long name would push the code off the row instead of
@@ -380,13 +452,7 @@ export function AccountCard({
             >
               {codeDigits}
             </span>
-            <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
-              {copied ? (
-                <Check size={14} className="text-green-600 dark:text-green-400" />
-              ) : (
-                <Copy size={14} className="text-gray-400 dark:text-gray-500" />
-              )}
-            </span>
+            <CopyState copied={copied} size={14} />
           </button>
 
           {/* Always in the flow, only faded: revealing them on hover by taking
@@ -470,8 +536,10 @@ export function AccountCard({
       <div className="flex items-center justify-between">
         <button
           onClick={handleCopy}
-          className="flex-1 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-dark-700 rounded-lg p-1.5 -m-1.5 transition-colors group/copy relative"
+          onPointerDown={startRipple}
+          className="flex-1 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-dark-700 rounded-lg p-1.5 -m-1.5 transition-colors group/copy relative overflow-hidden"
         >
+          {rippleNode}
           {/* dir="ltr" is load-bearing, not tidiness. The code is drawn in
               groups of three separated by a space, and under RTL the bidi
               algorithm resolves that neutral space to the paragraph direction:
@@ -491,15 +559,9 @@ export function AccountCard({
               card it read as an unrelated control. The label goes after the icon
               so appearing does not shove the icon sideways. */}
           <div className="flex items-center gap-2">
-            <div className={`transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
-              {copied ? (
-                <Check size={16} className="text-green-600 dark:text-green-400" />
-              ) : (
-                <Copy size={16} className="text-gray-400 dark:text-gray-500" />
-              )}
-            </div>
+            <CopyState copied={copied} size={16} />
             {copied && (
-              <span className="text-xs font-medium text-green-600 dark:text-green-400 animate-in fade-in slide-in-from-left-1 duration-200">
+              <span className="copied-in text-xs font-medium text-green-600 dark:text-green-400">
                 {t('accounts.copied')}
               </span>
             )}
