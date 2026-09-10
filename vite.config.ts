@@ -62,6 +62,24 @@ function copyFilesPlugin() {
         }
       });
 
+      // Copy the bundled fonts, directory structure intact: globals.css asks
+      // for them by absolute path (/fonts/...), which is the extension root at
+      // runtime. Recursive because the Ubuntu subsets and the Korean face sit
+      // in one subdirectory each, alongside the licences they must travel with.
+      const fontsDir = resolve(__dirname, 'public/fonts');
+      if (existsSync(fontsDir)) {
+        const copyTree = (from: string, to: string) => {
+          mkdirSync(to, { recursive: true });
+          for (const entry of readdirSync(from, { withFileTypes: true })) {
+            const source = resolve(from, entry.name);
+            const target = resolve(to, entry.name);
+            if (entry.isDirectory()) copyTree(source, target);
+            else copyFileSync(source, target);
+          }
+        };
+        copyTree(fontsDir, resolve(__dirname, 'dist/fonts'));
+      }
+
       // Copy any bundled images (none at present — the welcome page is hosted
       // at authenticator.sh/welcome and no longer ships with the extension)
       const imagesDir = resolve(__dirname, 'public/images');

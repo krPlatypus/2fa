@@ -34,8 +34,18 @@ export default {
         }
       },
       fontFamily: {
-        sans: ['system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        // Ubuntu holds Latin and Cyrillic; it has no Hangul, so Korean falls
+        // through to the next name on its own — no per-language switching
+        // anywhere in the app. The platform stack stays at the end for the
+        // scripts neither face covers.
+        sans: ['Ubuntu', 'TmoneyRoundWind', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+        // The codes, and the seconds counted down beside them. Same order
+        // reversed: here the Korean face is wanted for its digits, which are
+        // tabular at 640 units each, so a code does not shift as it changes.
+        // The monospace stack behind it is not decoration — it is what keeps
+        // that true if the face is ever unavailable.
+        otp: ['TmoneyRoundWind', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
       },
       animation: {
         'spin-slow': 'spin 3s linear infinite',
