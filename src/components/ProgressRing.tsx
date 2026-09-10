@@ -1,4 +1,5 @@
-import { codeUrgency } from '@/utils/totp';
+import { useMemo } from 'react';
+import { codeUrgency, getTimeOffsetMs } from '@/utils/totp';
 
 interface ProgressRingProps {
   remaining: number;
@@ -13,7 +14,6 @@ export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps
   // and a literal "NaN" inside the ring. The TOTP default is the honest guess.
   const safePeriod = Number.isFinite(period) && period > 0 ? period : 30;
   const safeRemaining = Number.isFinite(remaining) ? remaining : safePeriod;
-  const percentage = (safeRemaining / safePeriod) * 100;
   // Grey while there is time, then the same two steps the code itself takes.
   // The thresholds are not repeated here — see codeUrgency in utils/totp.ts,
   // which exists because they used to be.
@@ -26,11 +26,35 @@ export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps
         : null;
   const center = size / 2;
   const radius = center - 4;
-  // Derived from the radius the circle actually uses. It used to be computed
-  // from r=18 while the circle was drawn at r=16, so the dash array was ~12%
-  // too long and the ring never quite reached empty before resetting.
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (percentage / 100) * circumference;
+
+  /**
+   * The sweep, aimed once and then left to CSS.
+   *
+   * The ring used to be drawn from `remaining`, which arrives as a whole
+   * number once a second, with `transition-all duration-1000` smoothing over
+   * the steps. That bought a ring permanently one second behind the number
+   * beside it, and at every window boundary the jump from 0 back to the full
+   * period was smoothed too — so the ring wound visibly *backwards* over a
+   * second before starting down again.
+   *
+   * The phase comes from the clock rather than from `remaining`, so it is
+   * exact to the millisecond instead of to the second, and the corrected clock
+   * is used because that is the one the code itself was generated against. A
+   * negative delay is what starts an animation partway through: at 12 seconds
+   * into a 30-second window the sweep begins 12 seconds in.
+   *
+   * Memoised on the period alone, so the once-a-second re-render this
+   * component still gets — the countdown in the middle needs it — hands React
+   * the identical delay every time and never restarts what is running. Left
+   * alone, `infinite` carries it across every later window on its own.
+   */
+  const sweep = useMemo(
+    () => ({
+      animationDuration: `${safePeriod}s`,
+      animationDelay: `-${((Date.now() + getTimeOffsetMs()) / 1000) % safePeriod}s`,
+    }),
+    [safePeriod]
+  );
 
   return (
     <div className="relative" style={{ width: size, height: size }}>
@@ -44,18 +68,24 @@ export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps
           fill="none"
           className="text-gray-200 dark:text-dark-600"
         />
+        {/* pathLength rescales the dash units so 100 is once around, whatever
+            the radius. The dash array and the keyframes are then plain numbers
+            that hold for both ring sizes — and the arithmetic that used to
+            compute a circumference here from the wrong radius, and left the
+            ring never quite reaching empty, is gone rather than corrected. */}
         <circle
           cx={center}
           cy={center}
           r={radius}
+          pathLength={100}
           stroke="currentColor"
           strokeWidth="2"
           fill="none"
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          className={`transition-all duration-1000 ${
+          strokeDasharray={100}
+          className={`ring-sweep transition-colors duration-300 ${
             urgencyColour ?? 'text-gray-700 dark:text-gray-300'
           }`}
+          style={sweep}
           strokeLinecap="round"
         />
       </svg>

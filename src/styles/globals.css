@@ -182,6 +182,25 @@
   background: #64748b;
 }
 
+/* The countdown ring, swept in CSS rather than stepped in React.
+   Paired with pathLength={100} on the circle, so 0 is a full ring and 100 an
+   empty one at either size the ring is drawn at. Duration and phase come from
+   the element — see ProgressRing. */
+@keyframes ring-sweep {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+
+.ring-sweep {
+  animation-name: ring-sweep;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
