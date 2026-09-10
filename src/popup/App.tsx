@@ -17,6 +17,7 @@ import { ReviewPrompt } from '@/components/ReviewPrompt';
 import { Logo } from '@/components/Logo';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { SettingToggle } from '@/components/SettingToggle';
+import { GroupIconSettings } from '@/components/GroupIconSettings';
 import { LockScreen } from '@/components/LockScreen';
 import { VaultPrompt } from '@/components/VaultPrompt';
 import { VaultSettings } from '@/components/VaultSettings';
@@ -41,7 +42,7 @@ import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/uti
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
-import { forgetAccountIcons, getCustomIcons, setAccountIcon, type IconStore } from '@/utils/custom-icons';
+import { forgetAccountIcons, getCustomIcons, setAccountIcon, setGroupIcon, type IconStore } from '@/utils/custom-icons';
 import { isQuickFillEnabled, peekPickPrompt, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
@@ -805,6 +806,11 @@ function App() {
     setCustomIcons(await getCustomIcons());
   };
 
+  const handleGroupIconChange = async (group: string, iconName: string | null) => {
+    await setGroupIcon(group, iconName);
+    setCustomIcons(await getCustomIcons());
+  };
+
   // Nothing renders until we know whether there is a vault: the alternative is
   // a flash of either the account list or the "no accounts yet" empty state,
   // and on a 2FA app the latter reads as "my accounts are gone".
@@ -1097,6 +1103,15 @@ function App() {
             }}
           />
 
+          {/* Directly under the account-icon switch: both answer "what is the
+              picture next to this thing", one for rows and one for chips. */}
+          <GroupIconSettings
+            groups={groups.map(group => group.name)}
+            icons={customIcons.groups}
+            onChange={handleGroupIconChange}
+            language={language}
+          />
+
           <SettingToggle
             label={t('settings.suggested')}
             hint={t('settings.suggestedHint')}
@@ -1222,6 +1237,7 @@ function App() {
           active={activeGroup}
           onChange={handleGroupChange}
           language={language}
+          icons={customIcons.groups}
         />
       )}
 

@@ -307,6 +307,10 @@ type VaultTranslationKeys = {
   'export.cxfHint': string;
   'settings.avatars': string;
   'settings.avatarsHint': string;
+  'settings.groupIcons': string;
+  'settings.groupIconsHint': string;
+  'settings.groupIconsEmpty': string;
+  'settings.groupIconNone': string;
   'settings.version': string;
   'settings.rateUs': string;
   'export.uri': string;
