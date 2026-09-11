@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "डिफ़ॉल्ट",
   "edit.iconHint": "{0} में दोबारा बनाकर सिर्फ़ इस ब्राउज़र में सहेजा जाता है। पहचानी गई सेवाओं को उनका लोगो मिलता है।",
   "edit.iconFailed": "वह छवि इस्तेमाल नहीं हो सकी",
+  "edit.label": "प्रदर्शित नाम",
+  "edit.labelHint": "सूची में सेवा और खाते की जगह यही दिखता है। सामान्य नाम पर लौटने के लिए खाली छोड़ें।",
   "addAccount.scanFromScreen": "स्क्रीन से QR स्कैन करें",
   "addAccount.errorScreenCapture": "स्क्रीन कैप्चर विफल: {0}",
   "backup.reminderTitle": "अपने खातों का बैकअप लें",

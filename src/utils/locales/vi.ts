@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "Mặc định",
   "edit.iconHint": "Được vẽ lại thành {0} và chỉ lưu trên trình duyệt này. Dịch vụ được nhận diện sẽ có logo riêng.",
   "edit.iconFailed": "Không thể dùng ảnh đó",
+  "edit.label": "Tên hiển thị",
+  "edit.labelHint": "Hiện trong danh sách thay cho dịch vụ và tài khoản. Để trống để quay lại tên thường.",
   "addAccount.scanFromScreen": "Quét QR từ màn hình",
   "addAccount.errorScreenCapture": "Chụp màn hình thất bại: {0}",
   "backup.reminderTitle": "Sao lưu tài khoản",

@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "Standard",
   "edit.iconHint": "Ritas om till {0} och sparas bara i den här webbläsaren. Tjänster som känns igen får sin egen logotyp.",
   "edit.iconFailed": "Den bilden kunde inte användas",
+  "edit.label": "Visningsnamn",
+  "edit.labelHint": "Visas i listan i stället för tjänsten och kontot. Lämna tomt för att få tillbaka det vanliga.",
   "addAccount.scanFromScreen": "Skanna QR från skärmen",
   "addAccount.errorScreenCapture": "Skärmdump misslyckades: {0}",
   "backup.reminderTitle": "Säkerhetskopiera dina konton",

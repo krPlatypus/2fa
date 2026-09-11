@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "Gunakan bawaan",
   "edit.iconHint": "Digambar ulang ke {0} dan disimpan hanya di peramban ini. Layanan yang dikenali memakai logonya sendiri.",
   "edit.iconFailed": "Gambar itu tidak dapat digunakan",
+  "edit.label": "Nama tampilan",
+  "edit.labelHint": "Muncul di daftar menggantikan layanan dan akun. Kosongkan untuk kembali ke nama biasa.",
   "addAccount.scanFromScreen": "Pindai QR dari layar",
   "addAccount.errorScreenCapture": "Gagal menangkap layar: {0}",
   "backup.reminderTitle": "Cadangkan akun Anda",

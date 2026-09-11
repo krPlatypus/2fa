@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "ค่าเริ่มต้น",
   "edit.iconHint": "วาดใหม่เป็น {0} และเก็บไว้ในเบราว์เซอร์นี้เท่านั้น บริการที่รู้จักจะได้โลโก้ของตัวเอง",
   "edit.iconFailed": "ไม่สามารถใช้รูปภาพนั้นได้",
+  "edit.label": "ชื่อที่แสดง",
+  "edit.labelHint": "แสดงในรายการแทนชื่อบริการและบัญชี เว้นว่างเพื่อกลับไปใช้ชื่อเดิม",
   "addAccount.scanFromScreen": "สแกน QR จากหน้าจอ",
   "addAccount.errorScreenCapture": "จับภาพหน้าจอล้มเหลว: {0}",
   "backup.reminderTitle": "สำรองข้อมูลบัญชี",

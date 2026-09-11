@@ -299,4 +299,31 @@ export async function run(): Promise<void> {
     check('turning it back on merges again', (await storage.getAccounts()).length === 2);
   }
 
+
+  scenario('A display name survives a round trip, and a hostile one does not');
+  {
+    await resetState();
+    const backupFile = await import('@/utils/backup-file');
+    const named = { ...ACCOUNTS[0], label: '회사 GitLab' };
+    await storage.importAccountList([named as any]);
+    check('the label is stored', (await storage.getAccounts())[0].label === '회사 GitLab');
+
+    // It rides in the account record, so the JSON backup carries it with no
+    // work — unlike the icons, which needed their own field in the file.
+    const text = backupFile.buildPlainBackupFile(await storage.getAccounts());
+    await resetState();
+    await storage.importAccounts(text);
+    check('and comes back from a backup', (await storage.getAccounts())[0].label === '회사 GitLab');
+
+    // From a file, so not trusted: cut rather than refused, because it is shown
+    // and not matched on.
+    await resetState();
+    await storage.importAccountList([{ ...ACCOUNTS[0], label: 'x'.repeat(500) } as any]);
+    check('an absurd one is cut to fit', (await storage.getAccounts())[0].label?.length === 64);
+
+    await resetState();
+    await storage.importAccountList([{ ...ACCOUNTS[0], label: '   ' } as any]);
+    check('and whitespace is no label at all', (await storage.getAccounts())[0].label === undefined);
+  }
+
 }

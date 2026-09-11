@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "기본으로",
   "edit.iconHint": "{0}으로 다시 그려서 이 브라우저에만 저장합니다. 알아보는 서비스는 자체 로고가 붙습니다.",
   "edit.iconFailed": "그 이미지는 사용할 수 없습니다",
+  "edit.label": "표시 이름",
+  "edit.labelHint": "목록에서 서비스·계정 대신 이 이름이 보입니다. 비우면 원래대로 돌아갑니다.",
   "addAccount.scanFromScreen": "화면에서 QR 스캔",
   "addAccount.errorScreenCapture": "화면 캡처 실패: {0}",
   "backup.reminderTitle": "계정 백업하기",

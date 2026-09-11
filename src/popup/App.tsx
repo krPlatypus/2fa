@@ -366,10 +366,14 @@ function App() {
 
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
+      // The label is searched alongside the two fields, not instead of them: it
+      // hides the issuer from the row, and someone who remembers the issuer
+      // should still find the account by it.
       list = list.filter(
         (acc) =>
           acc.name.toLowerCase().includes(query) ||
-          acc.issuer.toLowerCase().includes(query)
+          acc.issuer.toLowerCase().includes(query) ||
+          (acc.label ?? '').toLowerCase().includes(query)
       );
     }
 

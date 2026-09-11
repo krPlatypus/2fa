@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "既定に戻す",
   "edit.iconHint": "{0} に描き直してこのブラウザーにのみ保存します。認識できるサービスには専用のロゴが付きます。",
   "edit.iconFailed": "その画像は使用できませんでした",
+  "edit.label": "表示名",
+  "edit.labelHint": "一覧でサービス名とアカウント名の代わりに表示されます。空にすると元に戻ります。",
   "addAccount.scanFromScreen": "画面からQRをスキャン",
   "addAccount.errorScreenCapture": "画面キャプチャに失敗: {0}",
   "backup.reminderTitle": "アカウントをバックアップ",

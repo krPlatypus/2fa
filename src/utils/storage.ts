@@ -887,6 +887,8 @@ export interface ImportResult {
 /** Longest group name we will store. Display truncates anyway; this keeps a
  *  pathological name out of the sync chunk budget and off every record. */
 const MAX_GROUP_LENGTH = 64;
+/** Long enough for any row title, short enough that a file cannot bloat one. */
+const MAX_LABEL_LENGTH = 64;
 
 /**
  * Coerce one entry from a file into an Account, or return null if it is beyond
@@ -922,6 +924,15 @@ function normalizeImported(entry: unknown, index: number): Account | null {
     // is the one the duplicate check and the sync merge compare against.
     secret: cleanSecret(acc.secret),
   };
+
+  // Same treatment as `group`: it arrives from files as well as from our form,
+  // and it is shown rather than matched on, so a long one is cut instead of
+  // rejected.
+  if (typeof acc.label === 'string' && acc.label.trim()) {
+    normalized.label = acc.label.slice(0, MAX_LABEL_LENGTH);
+  } else {
+    delete normalized.label;
+  }
 
   if (typeof acc.group === 'string') {
     const group = acc.group.slice(0, MAX_GROUP_LENGTH);

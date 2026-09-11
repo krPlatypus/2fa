@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "По умолчанию",
   "edit.iconHint": "Перерисовывается в {0} и хранится только в этом браузере. Известные сервисы получают свой логотип.",
   "edit.iconFailed": "Это изображение не удалось использовать",
+  "edit.label": "Отображаемое имя",
+  "edit.labelHint": "Показывается в списке вместо сервиса и аккаунта. Оставьте пустым, чтобы вернуть обычное.",
   "addAccount.scanFromScreen": "Сканировать QR с экрана",
   "addAccount.errorScreenCapture": "Ошибка захвата экрана: {0}",
   "backup.reminderTitle": "Сделайте резервную копию",

@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "恢复默认",
   "edit.iconHint": "会重绘为 {0} 并仅保存在此浏览器中。可识别的服务会使用自己的标志。",
   "edit.iconFailed": "无法使用该图片",
+  "edit.label": "显示名称",
+  "edit.labelHint": "在列表中代替服务和账户显示。留空则恢复原样。",
   "addAccount.scanFromScreen": "从屏幕扫描QR码",
   "addAccount.errorScreenCapture": "截屏失败：{0}",
   "backup.reminderTitle": "备份您的账户",

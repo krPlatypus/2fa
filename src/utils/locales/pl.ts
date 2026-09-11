@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "Domyślna",
   "edit.iconHint": "Przerysowywany do {0} i zapisywany tylko w tej przeglądarce. Rozpoznane usługi dostają własne logo.",
   "edit.iconFailed": "Nie udało się użyć tego obrazu",
+  "edit.label": "Nazwa wyświetlana",
+  "edit.labelHint": "Pokazuje się na liście zamiast usługi i konta. Zostaw puste, aby wrócić do zwykłej.",
   "addAccount.scanFromScreen": "Skanuj QR z ekranu",
   "addAccount.errorScreenCapture": "Nie udało się przechwycić ekranu: {0}",
   "backup.reminderTitle": "Zrób kopię zapasową kont",

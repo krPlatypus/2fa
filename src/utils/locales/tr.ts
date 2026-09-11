@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "Varsayılan",
   "edit.iconHint": "{0} olarak yeniden çizilir ve yalnızca bu tarayıcıda saklanır. Tanınan servisler kendi logosunu alır.",
   "edit.iconFailed": "Bu görsel kullanılamadı",
+  "edit.label": "Görünen ad",
+  "edit.labelHint": "Listede servis ve hesap yerine bu görünür. Her zamankine dönmek için boş bırakın.",
   "addAccount.scanFromScreen": "Ekrandan QR tara",
   "addAccount.errorScreenCapture": "Ekran yakalama başarısız: {0}",
   "backup.reminderTitle": "Hesaplarınızı yedekleyin",

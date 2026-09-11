@@ -482,6 +482,21 @@ export async function run(): Promise<void> {
     check('an unusable remaining is calm, not critical', u(NaN) === 'calm');
   }
 
+  scenario('What a row is called');
+  {
+    const { accountLabel } = await import('@/utils/account-label');
+
+    check('issuer and name, joined', accountLabel({ issuer: 'GitHub', name: 'ada@work.com' }) === 'GitHub: ada@work.com');
+    check('one word in both fields is said once', accountLabel({ issuer: 'vpn', name: 'VPN' }) === 'vpn');
+    check('either on its own', accountLabel({ issuer: 'GitHub', name: '' }) === 'GitHub' && accountLabel({ issuer: '', name: 'ada' }) === 'ada');
+
+    // The whole point of the field: issuer and name stay as they are, because
+    // the site match, the brand mark and the exported URI all read them.
+    check('a label replaces the pair', accountLabel({ issuer: 'gitlab.spade.company', name: 'Gitlab root', label: '회사 GitLab' }) === '회사 GitLab');
+    check('blank or spaces is not a label', accountLabel({ issuer: 'GitHub', name: 'ada', label: '   ' }) === 'GitHub: ada');
+    check('and neither is something that is not a string', accountLabel({ issuer: 'GitHub', name: 'ada', label: 7 }) === 'GitHub: ada');
+  }
+
   scenario('Which brand mark an issuer gets');
   {
     const brands = await import('@/utils/brand-icons');

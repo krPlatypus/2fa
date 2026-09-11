@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "الافتراضي",
   "edit.iconHint": "تُرسم من جديد بحجم {0} وتُخزَّن على هذا المتصفح فقط. الخدمات المعروفة تحصل على شعارها.",
   "edit.iconFailed": "لا يمكن استخدام هذه الصورة",
+  "edit.label": "الاسم المعروض",
+  "edit.labelHint": "يظهر في القائمة بدل الخدمة والحساب. اتركه فارغًا للعودة إلى الاسم المعتاد.",
   "addAccount.scanFromScreen": "مسح QR من الشاشة",
   "addAccount.errorScreenCapture": "فشل التقاط الشاشة: {0}",
   "backup.reminderTitle": "انسخ حساباتك احتياطياً",

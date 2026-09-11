@@ -4,6 +4,7 @@ import type { Account } from '@/types';
 import { ModalHeader } from './ModalHeader';
 import { GroupInput } from './GroupInput';
 import { AccountIcon } from './AccountIcon';
+import { accountLabel } from '@/utils/account-label';
 import { fileToIcon, ICON_PX } from '@/utils/custom-icons';
 import { createT, type Language } from '@/utils/i18n';
 
@@ -33,6 +34,7 @@ export function EditAccountModal({
   const [name, setName] = useState(account.name);
   const [issuer, setIssuer] = useState(account.issuer);
   const [group, setGroup] = useState(account.group ?? '');
+  const [label, setLabel] = useState(account.label ?? '');
   const [showSecret, setShowSecret] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +92,13 @@ export function EditAccountModal({
     const nextGroup = group.trim();
     if (nextGroup !== (account.group?.trim() ?? '')) {
       updates.group = nextGroup || undefined;
+    }
+
+    // Same shape as the group above: blank clears it rather than storing an
+    // empty string, so "no label" is one state and not two.
+    const nextLabel = label.trim();
+    if (nextLabel !== (account.label?.trim() ?? '')) {
+      updates.label = nextLabel || undefined;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -205,6 +214,23 @@ export function EditAccountModal({
                 onChange={(e) => setIssuer(e.target.value)}
                 className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
               />
+            </div>
+
+            {/* After the two fields it replaces, so it reads as "or call it
+                this" rather than as a third thing to fill in. */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                {t('edit.label')}
+              </label>
+              <input
+                type="text"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                maxLength={64}
+                placeholder={accountLabel({ ...account, issuer, name, label: '' })}
+                className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
+              />
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{t('edit.labelHint')}</p>
             </div>
 
             <div>

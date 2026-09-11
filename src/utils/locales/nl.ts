@@ -126,6 +126,8 @@ const strings: TranslationStrings = {
   "edit.iconClear": "Standaard",
   "edit.iconHint": "Wordt op {0} hertekend en alleen in deze browser opgeslagen. Herkende diensten krijgen hun eigen logo.",
   "edit.iconFailed": "Die afbeelding kon niet worden gebruikt",
+  "edit.label": "Weergavenaam",
+  "edit.labelHint": "Verschijnt in de lijst in plaats van de dienst en het account. Laat leeg voor de gebruikelijke naam.",
   "addAccount.scanFromScreen": "QR scannen van scherm",
   "addAccount.errorScreenCapture": "Schermopname mislukt: {0}",
   "backup.reminderTitle": "Maak een back-up van je accounts",

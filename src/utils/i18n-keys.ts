@@ -204,6 +204,8 @@ type TranslationKeys = {
   'edit.iconClear': string;
   'edit.iconHint': string;
   'edit.iconFailed': string;
+  'edit.label': string;
+  'edit.labelHint': string;
 
   // Scan from screen
   'addAccount.scanFromScreen': string;
