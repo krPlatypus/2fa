@@ -306,10 +306,41 @@ export async function clearKeyHandoff(): Promise<void> {
 
 // --- vault metadata -------------------------------------------------------
 
+/**
+ * The vault as this device has it written down. Local storage only.
+ *
+ * This is the hot one. It is read on every account decode, on every encode, on
+ * every `isVaultEnabled`, and once more by the popup before it will paint
+ * anything at all — and it used to reach chrome.storage.sync every time. That
+ * is not a disk read: it goes through Chrome's sync service, and on the first
+ * popup after the browser starts it can take over a second on its own. Opening
+ * the app cost three of them.
+ *
+ * The sync half is a real thing this has to do, but it is not a thing it has to
+ * do *here* — see reconcileVaultMeta below, which does it once after the window
+ * is on screen and again before anything asks for a key.
+ */
 export async function getVaultMeta(): Promise<VaultMeta | null> {
-  const localMeta = (await chrome.storage.local.get(VAULT_META_KEY))[VAULT_META_KEY] as
+  const meta = (await chrome.storage.local.get(VAULT_META_KEY))[VAULT_META_KEY] as
     | VaultMeta
     | undefined;
+  return meta ?? null;
+}
+
+/**
+ * Adopt the vault metadata from another device, if it has newer.
+ *
+ * What getVaultMeta used to do inline. It has to happen — a password changed on
+ * one machine is rejected forever on the others otherwise, which is a live
+ * backdoor on every device that missed the change — but it does not have to
+ * happen in front of the first paint. So it runs in the background once the
+ * popup is up, and again, awaited, at the top of everything that unwraps a key.
+ *
+ * Returns the metadata that is now local, so callers that need the current one
+ * can use the result rather than reading again.
+ */
+export async function reconcileVaultMeta(): Promise<VaultMeta | null> {
+  const localMeta = await getVaultMeta();
 
   let syncedMeta: VaultMeta | undefined;
   try {
@@ -450,7 +481,7 @@ async function unwrapWith(
 }
 
 export async function unlockWithPassword(password: string): Promise<Uint8Array> {
-  const meta = await getVaultMeta();
+  const meta = await reconcileVaultMeta();
   if (!meta) throw new Error('No vault configured');
 
   const masterKeyBytes = await unwrapWith(meta, password, 'salt', 'wrappedByPassword');
@@ -459,7 +490,7 @@ export async function unlockWithPassword(password: string): Promise<Uint8Array> 
 }
 
 export async function unlockWithRecoveryCode(code: string): Promise<Uint8Array> {
-  const meta = await getVaultMeta();
+  const meta = await reconcileVaultMeta();
   if (!meta) throw new Error('No vault configured');
 
   const masterKeyBytes = await unwrapWith(
@@ -503,7 +534,7 @@ export async function attachPasskey(
   prfOutput: Uint8Array,
   label: string
 ): Promise<void> {
-  const meta = await getVaultMeta();
+  const meta = await reconcileVaultMeta();
   if (!meta) throw new Error('No vault configured');
 
   const wrappingKey = await deriveKeyFromPrf(prfOutput);
@@ -523,7 +554,7 @@ export async function attachPasskey(
 }
 
 export async function unlockWithPasskey(prfOutput: Uint8Array): Promise<Uint8Array> {
-  const meta = await getVaultMeta();
+  const meta = await reconcileVaultMeta();
   if (!meta) throw new Error('No vault configured');
   if (!meta.passkey) throw new Error('No passkey is registered for this vault');
 
@@ -546,7 +577,7 @@ export async function unlockWithPasskey(prfOutput: Uint8Array): Promise<Uint8Arr
  * so this can never leave the vault unopenable.
  */
 export async function detachPasskey(): Promise<void> {
-  const meta = await getVaultMeta();
+  const meta = await reconcileVaultMeta();
   if (!meta || !meta.passkey) return;
 
   const { passkey: _removed, ...withoutPasskey } = meta;
@@ -662,7 +693,7 @@ export function clearKeyCache(): void {
  * two-level key design.
  */
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
-  const meta = await getVaultMeta();
+  const meta = await reconcileVaultMeta();
   if (!meta) throw new Error('No vault configured');
 
   const masterKeyBytes = await unwrapWith(meta, currentPassword, 'salt', 'wrappedByPassword');
@@ -696,7 +727,7 @@ export async function resetPasswordWithRecoveryCode(
   code: string,
   newPassword: string
 ): Promise<string> {
-  const meta = await getVaultMeta();
+  const meta = await reconcileVaultMeta();
   if (!meta) throw new Error('No vault configured');
 
   const masterKeyBytes = await unwrapWith(
@@ -729,7 +760,7 @@ export async function resetPasswordWithRecoveryCode(
 
 /** Verifies a password without changing session state. */
 export async function verifyPassword(password: string): Promise<Uint8Array> {
-  const meta = await getVaultMeta();
+  const meta = await reconcileVaultMeta();
   if (!meta) throw new Error('No vault configured');
   return unwrapWith(meta, password, 'salt', 'wrappedByPassword');
 }

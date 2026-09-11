@@ -9,6 +9,7 @@ import {
   isUnlocked,
   lock as lockVault,
   noteVaultActivity,
+  reconcileVaultMeta,
   setAutoLockMinutes as persistAutoLockMinutes,
   unlockWithPassword,
   unlockWithRecoveryCode,
@@ -59,6 +60,31 @@ export function useVault() {
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  /**
+   * Pick up a vault, or a password change, made on another device.
+   *
+   * getVaultMeta reads local storage only, which is what lets the popup paint
+   * without waiting on Chrome's sync service — that call can take over a second
+   * on the first open after the browser starts, and nothing rendered until it
+   * came back. The sync half still has to happen, or a password changed on one
+   * machine is rejected forever on the others, so it happens here instead: once,
+   * after the first paint, off the critical path.
+   *
+   * It is also awaited at the top of everything that unwraps a key, so a stale
+   * read here can only ever cost a redraw, never an unlock.
+   */
+  useEffect(() => {
+    let live = true;
+    void reconcileVaultMeta()
+      .then(() => {
+        if (live) refresh();
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
   }, [refresh]);
 
   // The passkey ceremony unlocks the vault from a window of its own. Without

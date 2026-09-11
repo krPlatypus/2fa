@@ -521,10 +521,29 @@ function identityOf(record: StoredAccount): string {
 // 2) accounts in local but not sync (sync write was dropped by quota) survive.
 // Deletions don't propagate cross-device — acceptable for a 2FA app where
 // keeping a stale code is far better than losing one.
-export async function getStoredAccounts(): Promise<StoredAccount[]> {
+export interface ReadOptions {
+  /**
+   * Return the local copy without going near chrome.storage.sync.
+   *
+   * For the first paint. `chrome.storage.sync.get(null)` is not a disk read —
+   * it goes through Chrome's sync service, and on the first popup after the
+   * browser starts it can take over a second, during which the window is blank.
+   * The caller paints what is on this device and asks again without this flag a
+   * moment later; the merge only ever adds records, so the list grows into
+   * place rather than changing under the user.
+   */
+  localOnly?: boolean;
+}
+
+export async function getStoredAccounts(options: ReadOptions = {}): Promise<StoredAccount[]> {
   return retryOperation(async () => {
     const localResult = await chrome.storage.local.get(STORAGE_KEY);
     const localAccounts: StoredAccount[] = localResult[STORAGE_KEY] || [];
+
+    // Sync switched off means there is nothing up there to merge — the setting
+    // removes what was already there — so the read was pure latency. It was
+    // unguarded because only the write path ever checked the preference.
+    if (options.localOnly || !(await isSyncEnabled())) return localAccounts;
 
     let syncAccounts: StoredAccount[] = [];
     let syncReadable = false;
@@ -583,8 +602,8 @@ export async function getStoredAccounts(): Promise<StoredAccount[]> {
  * list to both stores. One transient read failure plus one click destroyed
  * every account. Errors now propagate and the UI shows a failure state.
  */
-export async function getAccounts(): Promise<Account[]> {
-  return decodeAccounts(await getStoredAccounts());
+export async function getAccounts(options: ReadOptions = {}): Promise<Account[]> {
+  return decodeAccounts(await getStoredAccounts(options));
 }
 
 export interface SaveOptions {

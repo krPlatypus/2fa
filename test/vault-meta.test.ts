@@ -51,7 +51,7 @@ export async function run(): Promise<void> {
     vault.clearKeyCache();
     await vault.lock();
 
-    const winner = await vault.getVaultMeta();
+    const winner = await vault.reconcileVaultMeta();
     check('the change is adopted', winner?.wrappedByPassword === changedElsewhere.wrappedByPassword);
 
     let newWorks = false;
@@ -98,9 +98,31 @@ export async function run(): Promise<void> {
     areas.sync.vault_meta = { ...noCounter, updatedAt: Date.now() + 60_000, wrappedByPassword: withCounter.wrappedByPassword };
     areas.local.vault_meta = { ...withCounter, wrappedByPassword: 'stale-wrapping-from-before' };
 
-    const winner = await vault.getVaultMeta();
+    const winner = await vault.reconcileVaultMeta();
     check('the counterless copy still wins on its clock',
       winner?.wrappedByPassword === withCounter.wrappedByPassword && (winner as any).rev === undefined,
       JSON.stringify({ rev: (winner as any)?.rev }));
   }
+
+  scenario('Reading the metadata does not wait on sync');
+  {
+    await resetState();
+    const local = { vaultId: 'local-one', updatedAt: 1, rev: 1 } as any;
+    areas.local.vault_meta = local;
+    areas.sync.vault_meta = { vaultId: 'local-one', updatedAt: 999, rev: 9, wrappedByPassword: 'newer' } as any;
+
+    // The hot read. It runs on every account decode and in front of the first
+    // paint, so it has to stay local — a sync round trip there is what made the
+    // popup sit blank for a second after the browser started.
+    const hot = await vault.getVaultMeta();
+    check('the plain read returns what is on this device', (hot as any)?.rev === 1);
+    check('and leaves local untouched', (areas.local.vault_meta as any).rev === 1);
+
+    // And the adoption still happens, just somewhere else.
+    const reconciled = await vault.reconcileVaultMeta();
+    check('reconciling adopts the newer copy', (reconciled as any)?.rev === 9);
+    check('and writes it down', (areas.local.vault_meta as any).rev === 9);
+    check('so the next plain read sees it', ((await vault.getVaultMeta()) as any)?.rev === 9);
+  }
+
 }
