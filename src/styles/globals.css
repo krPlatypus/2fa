@@ -256,41 +256,22 @@
   animation: copy-flash 700ms ease-out forwards;
 }
 
-/* "Copied" arriving. Scale rather than a slide: a slide has a direction, and
-   the direction is wrong in half the languages this ships in. The classes that
-   used to do this — `animate-in fade-in slide-in-from-left-1` — are
-   tailwindcss-animate's, and that plugin is not installed, so the label had
-   been appearing with no animation at all. */
-@keyframes copied-in {
-  from {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.copied-in {
-  animation: copied-in 200ms cubic-bezier(0.2, 0, 0.2, 1) both;
-}
-
-/* Both of the above are acknowledgement, not information: the tick and the
-   word say the same thing and stay.
+/* The tick over the ring used to have a keyframe here too, and that was the
+   bug: an entry animation and no exit, so it faded in and the seconds came
+   back in one frame. It is a two-way transition on a permanently mounted
+   element now, which needs no CSS of its own — see ringWithTick.
 
    Shortened rather than removed. `animation: none` fires no animationend, and
    animationend is what unmounts the ripple — the circle would have sat on the
    row until the next press replaced it. */
 @media (prefers-reduced-motion: reduce) {
-  .copy-ripple,
-  .copied-in {
+  .copy-ripple {
     animation-duration: 1ms;
   }
 
-  /* Not shortened to nothing like the two above: this one *is* the message.
-     Held flat instead, so it is still visibly green for as long as `copied`
-     lasts and then goes with it. */
+  /* Not shortened like the ripple: this one *is* the message rather than a
+     flourish on it. Held flat instead, so it is visibly green for as long as
+     `copied` lasts and then goes with it. */
   .copy-flash {
     animation: none;
     opacity: 1;

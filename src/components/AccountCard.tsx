@@ -371,11 +371,23 @@ export function AccountCard({
   const ringWithTick = (size?: number) => (
     <span className="relative flex-shrink-0">
       <ProgressRing remaining={totp.remaining} period={totp.period} size={size} />
-      {copied && (
-        <span className="copied-in absolute inset-0 grid place-items-center rounded-full bg-white/85 text-green-600 dark:bg-dark-800/85 dark:text-green-400">
-          <Check size={size && size < 32 ? 13 : 16} aria-hidden />
-        </span>
-      )}
+      {/* Always mounted, never conditionally rendered. It used to arrive on an
+          entry animation and then simply stop existing, so the seconds came
+          back in a single frame — the tick faded in politely and the number
+          snapped back. A transition runs both ways by itself; there is no exit
+          animation to write, only an element to keep.
+
+          Out more slowly than in. Arriving is a reply to something the user
+          just did and should be immediate; leaving is the row going quiet, and
+          quiet is allowed to take its time. */}
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute inset-0 grid place-items-center rounded-full bg-white/85 text-green-600 transition-[opacity,transform] dark:bg-dark-800/85 dark:text-green-400 ${
+          copied ? 'scale-100 opacity-100 duration-150' : 'scale-90 opacity-0 duration-500'
+        }`}
+      >
+        <Check size={size && size < 32 ? 13 : 16} aria-hidden />
+      </span>
     </span>
   );
 
