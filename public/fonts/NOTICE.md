@@ -22,28 +22,30 @@ redistribution are permitted; subsetting is why the files above are small.
 
 ## 티머니 둥근바람 — Korean, and the codes
 
-`tmoney/TmoneyRoundWindRegular.otf`, 3.0 MB, from
-<https://www.tmoney.co.kr/aeb/cmnctn/ci/ci.dev>, byte-for-byte as Tmoney
-distributes it in `TmoneyRoundWind.zip` (`02_수동설치파일/01_otf/`).
+Not bundled. `src` in globals.css lists three `local()` names and no `url()`,
+so the face is used where the machine already has it installed and ignored
+everywhere else. Korean then falls through to the platform font, which is what
+this app used before any font was chosen at all.
 
-**Unmodified on purpose.** The licence is free for any use, commercial
-included, but forbids selling the font and forbids redistributing a modified
-or adapted copy — it has to travel in the form it was distributed in. So no
-subsetting to the 2,350 common syllables, and no WOFF2 conversion, either of
-which would have taken this file under a megabyte. The 3.0 MB is the price of
-staying inside the licence.
+It did ship here once, 3.0 MB of it. The licence is free for any use,
+commercial included, but forbids redistributing a modified or adapted copy — so
+no subsetting to the 2,350 common syllables and no WOFF2 conversion, either of
+which would have taken it under a megabyte. Shipping it unmodified was the only
+way to ship it, and 3.0 MB is a lot beside the 430 KB the rest of the popup
+weighs. The cost was never the bytes, which come off local disk through
+`chrome-extension://`; it was the twelve thousand glyphs Chrome parses into a
+typeface before the first frame, and on the first open after a browser start it
+showed.
 
-The OTF, not the TTF: same font, 3.0 MB against 4.4 MB, and both are shipped
-by Tmoney in that zip.
+Referencing an installed font is not redistribution, so the licence question
+goes away with the file.
 
-Regular only. ExtraBold is the only other weight offered, this interface's
-heaviest is `font-semibold`, and an extra-bold face standing in for a
-semi-bold one is worse than the browser synthesising the difference — and
-worse by another 3.0 MB.
+**To get it back on a machine:** download `TmoneyRoundWind.zip` from
+<https://www.tmoney.co.kr/aeb/cmnctn/ci/ci.dev> and install
+`02_수동설치파일/01_otf/TmoneyRoundWindRegular.otf`. Nothing in the extension
+needs changing — the `local()` names find it.
 
-Its digits are already tabular: every one of `0`–`9` is 640 units wide, so a
-code does not shift as it changes. That is the reason it can carry the codes
-and not only the Korean.
-
-`local()` comes before `url()` in every `@font-face` for this family, so a
-machine with the font installed never reads the bundled copy.
+Its digits are tabular, every one of `0`-`9` 640 units wide, so a code does not
+shift as it changes. That is why it carries the codes and not only the Korean,
+and why the `font-otp` stack falls back to monospace rather than to the UI
+font: the property has to survive the face being absent.

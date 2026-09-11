@@ -4,15 +4,15 @@
    `@import url(fonts.googleapis.com)` would have been one line and would have
    cost that claim.
 
-   Ubuntu carries Latin and Cyrillic, 티머니 둥근바람 carries Korean and the
-   codes. Neither covers the other's range, so the stack in tailwind.config.js
-   picks the right one per glyph with no work here. What neither covers —
-   Arabic, Hindi, Thai, Japanese, Chinese — falls through to the platform font,
-   which is the correct answer rather than a gap.
+   Ubuntu carries Latin and Cyrillic and is bundled. 티머니 둥근바람 carries
+   Korean and the codes and is not — it is used only where the machine already
+   has it installed. Neither covers the other's range, so the stack in
+   tailwind.config.js picks the right one per glyph with no work here, and
+   anything neither has — Arabic, Hindi, Thai, Japanese, Chinese, and Korean on
+   a machine without the face — falls through to the platform stack this app
+   used before any of this. That is the correct answer rather than a gap.
 
-   `local()` first in every face: a machine with the font installed reads
-   nothing off disk. See public/fonts/NOTICE.md for what is bundled, why the
-   Korean face is unsubsetted, and the licences. */
+   See public/fonts/NOTICE.md for what is bundled and the licences. */
 
 @font-face {
   font-family: 'Ubuntu';
@@ -95,22 +95,35 @@
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
-/* Korean, and the digits of every code.
-
-   One weight. ExtraBold is the only other one offered, this interface asks for
-   nothing above `font-semibold`, and an extra-bold face standing in for a
-   semi-bold one reads worse than the weight the browser synthesises — for
-   another 3 MB.
-
-   Declared at 400 and not `400 700`, which matters more than it looks: a range
-   tells the browser the face covers 600 itself, and it then draws Regular
-   outlines there and synthesises nothing. Korean headings and Korean body text
-   would have come out identical. At a flat 400, `font-medium` still lands on
-   Regular and `font-semibold` gets a synthetic bold, so the hierarchy the rest
-   of the interface is built on survives in Korean too.
-
-   No unicode-range: this family also draws the codes, and pinning it to Hangul
-   would have taken the digits with it. */
+/* Korean, and the digits of every code. Installed locally or not at all.
+ *
+ * The file used to ship here, all 3.0 MB of it, because the licence forbids
+ * redistributing a modified copy and so forbids subsetting it down. That is a
+ * lot next to the 430 KB the rest of this popup weighs, and it is not the
+ * bytes that cost — `chrome-extension://` reads come off local disk — it is
+ * the twelve thousand glyphs Chrome has to parse into a typeface before the
+ * first frame. On the first open after the browser starts it was measurable by
+ * eye.
+ *
+ * So: three `local()` names and no `url()`. A machine with the face installed
+ * draws in it at no cost at all, out of the system font cache. A machine
+ * without it falls through to the next name in the stack, which is the
+ * platform font this app used before any of this. Nothing is redistributed
+ * either, which takes the licence question off the table with it.
+ *
+ * Three names because the face is known by three: the PostScript name, the
+ * family name as Korean macOS reports it, and the name the Windows installer
+ * registers.
+ *
+ * Declared at 400 and not `400 700`, which matters more than it looks: a range
+ * tells the browser the face covers 600 itself, and it then draws Regular
+ * outlines there and synthesises nothing. Korean headings and Korean body text
+ * would have come out identical. At a flat 400, `font-medium` still lands on
+ * Regular and `font-semibold` gets a synthetic bold, so the hierarchy the rest
+ * of the interface is built on survives in Korean too.
+ *
+ * No unicode-range: this family also draws the codes, and pinning it to Hangul
+ * would have taken the digits with it. */
 @font-face {
   font-family: 'TmoneyRoundWind';
   font-style: normal;
@@ -119,8 +132,7 @@
   src:
     local('TmoneyRoundWind-Regular'),
     local('티머니 둥근바람 Regular'),
-    local('Tmoney RoundWind'),
-    url('/fonts/tmoney/TmoneyRoundWindRegular.otf') format('opentype');
+    local('Tmoney RoundWind');
 }
 
 @tailwind base;
