@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "veya",
   "accounts.importFromBackup": "yedekten içe aktar",
   "accounts.copied": "Kopyalandı!",
+  "accounts.copyFailed": "Kod kopyalanamadı — tekrar deneyin",
   "accounts.invalidSecret": "Geçersiz anahtar — düzenleyin veya kaldırın",
   "scan.batchMore": "{1} koddan {0}. kod — telefonunuzda {2} tane daha var",
   "scan.batchBody": "Google Authenticator dışa aktarımı birkaç koda böler. Telefonunuzda İleri'ye dokunup sonrakini gösterin ve burada tarayın. Taranmamış kodlardaki hesaplar hâlâ yalnızca telefonunuzda.",

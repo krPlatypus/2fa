@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "أو",
   "accounts.importFromBackup": "استيراد من النسخة الاحتياطية",
   "accounts.copied": "تم النسخ!",
+  "accounts.copyFailed": "تعذّر نسخ الرمز — حاول الضغط مرة أخرى",
   "accounts.invalidSecret": "مفتاح غير صالح — عدّله أو احذفه",
   "scan.batchMore": "الرمز {0} من {1} — ما زال على هاتفك {2}",
   "scan.batchBody": "يقسّم Google Authenticator التصدير على عدة رموز. اضغط «التالي» على هاتفك لعرض الرمز التالي ثم امسحه هنا. الحسابات في الرموز غير الممسوحة ما زالت على هاتفك فقط.",

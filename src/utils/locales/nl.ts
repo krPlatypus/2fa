@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "of",
   "accounts.importFromBackup": "importeren uit back-up",
   "accounts.copied": "Gekopieerd!",
+  "accounts.copyFailed": "De code kon niet worden gekopieerd — klik het nog eens",
   "accounts.invalidSecret": "Ongeldige sleutel — bewerk of verwijder",
   "scan.batchMore": "Code {0} van {1} — nog {2} op je telefoon",
   "scan.batchBody": "Google Authenticator verdeelt een export over meerdere codes. Tik op Volgende op je telefoon om de volgende te tonen en scan die hier. De accounts op nog niet gescande codes staan nog alleen op je telefoon.",

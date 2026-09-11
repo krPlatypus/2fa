@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "या",
   "accounts.importFromBackup": "बैकअप से आयात करें",
   "accounts.copied": "कॉपी किया!",
+  "accounts.copyFailed": "कोड कॉपी नहीं हो सका — दोबारा क्लिक करें",
   "accounts.invalidSecret": "अमान्य कुंजी — संपादित करें या हटाएं",
   "scan.batchMore": "{1} में से {0} कोड — आपके फ़ोन पर {2} और बाकी हैं",
   "scan.batchBody": "Google Authenticator एक्सपोर्ट को कई कोड में बाँटता है। अगला कोड दिखाने के लिए फ़ोन पर Next दबाएँ, फिर उसे यहाँ स्कैन करें। बिना स्कैन किए कोड के खाते अब भी सिर्फ़ आपके फ़ोन पर हैं।",

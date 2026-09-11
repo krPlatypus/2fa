@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "หรือ",
   "accounts.importFromBackup": "นำเข้าจากข้อมูลสำรอง",
   "accounts.copied": "คัดลอกแล้ว!",
+  "accounts.copyFailed": "คัดลอกรหัสไม่สำเร็จ — ลองกดอีกครั้ง",
   "accounts.invalidSecret": "คีย์ไม่ถูกต้อง — แก้ไขหรือลบ",
   "scan.batchMore": "รหัสที่ {0} จาก {1} — เหลืออีก {2} รหัสในโทรศัพท์",
   "scan.batchBody": "Google Authenticator แบ่งการส่งออกเป็นหลายรหัส แตะ ถัดไป บนโทรศัพท์เพื่อแสดงรหัสถัดไป แล้วสแกนที่นี่ บัญชีในรหัสที่ยังไม่ได้สแกนยังอยู่แค่บนโทรศัพท์",

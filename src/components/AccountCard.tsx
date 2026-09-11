@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type PointerEvent } from 'react';
 import { Copy, Check, Trash2, Pencil, Share2 } from 'lucide-react';
 import type { Account } from '@/types';
 import { accountLabel } from '@/utils/account-label';
+import { toast } from '@/utils/ui-feedback';
 import { useTOTP } from '@/hooks/useTOTP';
 import { codeUrgency } from '@/utils/totp';
 import { createT, type Language } from '@/utils/i18n';
@@ -126,9 +127,17 @@ export function AccountCard({
     try {
       await navigator.clipboard.writeText(totp.code);
     } catch (error) {
-      // Rejected when the document is not focused, or by policy. Swallowing it
-      // silently left the user unable to tell a failed copy from a misclick.
-      console.error('Could not copy the code to the clipboard', error);
+      // Rejected when the document is not focused, or by policy. Named rather
+      // than logged as the object: a DOMException prints as
+      // "[object DOMException]" and says nothing, and the name is the whole
+      // diagnosis — NotAllowedError with devtools holding focus is not the same
+      // problem as one without.
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.error('Could not copy the code to the clipboard —', detail);
+      // And said out loud. The console line above was added because failing
+      // silently left a failed copy indistinguishable from a misclick, which it
+      // still did — nothing on screen changed either way.
+      toast('error', t('accounts.copyFailed'));
       return;
     }
     setCopied(true);
@@ -290,9 +299,38 @@ export function AccountCard({
     onDrop: (e: React.DragEvent) => { e.preventDefault(); onDrop?.(e, account.id); },
   };
 
-  const baseClass = `relative group bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
+  const baseClass = `relative group group/copy overflow-hidden cursor-pointer bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
     isDragOver ? 'border-t-2 border-[#4285F4]' : ''
   }`;
+
+  /**
+   * The whole row copies, not a button inside it.
+   *
+   * The target used to be the code and the little clipboard beside it, which is
+   * a strip about a third of the row wide in a window this narrow — and the
+   * rest of the row, the part with the name on it, did nothing at all. The
+   * ripple follows on its own: it is sized from whatever was pressed.
+   *
+   * A div rather than a button, because a button's content model is phrasing
+   * content and every one of these rows is flex boxes and an SVG. role and
+   * tabIndex put it back on the keyboard, and Enter and Space do what the
+   * button did. That also gives the row focus of its own, which is what
+   * Shift+F10 needs to reach the context menu.
+   */
+  const rowProps = {
+    ...dragProps,
+    role: 'button' as const,
+    tabIndex: 0,
+    onClick: handleCopy,
+    onPointerDown: startRipple,
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      // Space scrolls a list by default, and this one is inside a list.
+      event.preventDefault();
+      void handleCopy();
+    },
+    'aria-label': fullName,
+  };
 
   /**
    * A record whose secret cannot produce a code.
@@ -306,10 +344,11 @@ export function AccountCard({
   if (!totp) {
     return (
       <div
-        {...dragProps}
+        {...rowProps}
         className={`${baseClass} py-3 ${viewMode === 'compact' ? 'px-3 after:inset-x-3' : 'px-4 after:inset-x-4'}`}
       >
         {menuNode}
+        {rippleNode}
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <TruncatedName
@@ -329,16 +368,12 @@ export function AccountCard({
   // Hidden mode — just name, click whole row to copy
   if (viewMode === 'hidden') {
     return (
-      <div {...dragProps} className={`${baseClass} px-4 py-2.5 after:inset-x-4 overflow-hidden`}>
+      <div {...rowProps} className={`${baseClass} px-4 py-2.5 after:inset-x-4`}>
         {menuNode}
+        {rippleNode}
         <div className="flex items-center gap-2">
 
-          <button
-            onClick={handleCopy}
-            onPointerDown={startRipple}
-            className="relative flex-1 min-w-0 flex items-center gap-2 text-start rounded-lg overflow-hidden group/copy"
-          >
-            {rippleNode}
+          <div className="relative flex-1 min-w-0 flex items-center gap-2 text-start">
             {showIcon && <AccountIcon account={account} size={18} iconUrl={iconUrl} />}
             <TruncatedName
               label={fullName}
@@ -352,7 +387,7 @@ export function AccountCard({
                 {t('accounts.copied')}
               </span>
             )}
-          </button>
+          </div>
 
 
           {/* Same 26px ring as the compact row: at the default 40 the mode that
@@ -385,15 +420,11 @@ export function AccountCard({
       // The drag goes with the handle. A row that still reorders with no
       // affordance, and jumps 2px mid-drag when isDragOver lands, is worse than
       // a row that does not reorder; that stays a normal-view job.
-      <div {...dragProps} className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
+      <div {...rowProps} className={`${baseClass} py-1.5 px-3 after:inset-x-3`}>
         {menuNode}
+        {rippleNode}
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleCopy}
-            onPointerDown={startRipple}
-            className="relative flex-1 min-w-0 flex items-center gap-1.5 text-start rounded-lg overflow-hidden group/copy"
-          >
-            {rippleNode}
+          <div className="relative flex-1 min-w-0 flex items-center gap-1.5 text-start">
             {showIcon && <AccountIcon account={account} size={18} iconUrl={iconUrl} />}
             {/* min-w-0: a flex item will not shrink below its content without
                 it, so a long name would push the code off the row instead of
@@ -411,7 +442,7 @@ export function AccountCard({
               {codeDigits}
             </span>
             <CopyState copied={copied} size={14} />
-          </button>
+          </div>
 
 
           <div className="flex-shrink-0">
@@ -424,8 +455,9 @@ export function AccountCard({
 
   // Normal mode
   return (
-    <div {...dragProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
+    <div {...rowProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
       {menuNode}
+        {rippleNode}
       {/* One row: the icon on the left, the name and the code stacked beside
           it, the ring on the right. The icon used to sit inline with the name,
           which left the code beginning at the card edge underneath it and made
@@ -460,12 +492,7 @@ export function AccountCard({
           </div>
 
           <div className="flex items-center justify-between">
-            <button
-              onClick={handleCopy}
-              onPointerDown={startRipple}
-              className="flex-1 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-dark-700 rounded-lg p-1.5 -m-1.5 transition-colors group/copy relative overflow-hidden"
-            >
-              {rippleNode}
+            <div className="relative flex flex-1 items-center gap-2 text-start">
               {/* dir="ltr" is load-bearing, not tidiness. The code is drawn in
                   groups of three separated by a space, and under RTL the bidi
                   algorithm resolves that neutral space to the paragraph direction:
@@ -492,7 +519,7 @@ export function AccountCard({
                   </span>
                 )}
               </div>
-            </button>
+            </div>
 
           </div>
         </div>

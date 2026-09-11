@@ -40,6 +40,7 @@ type TranslationKeys = {
   'accounts.or': string;
   'accounts.importFromBackup': string;
   'accounts.copied': string;
+  'accounts.copyFailed': string;
   'accounts.invalidSecret': string;
   'scan.batchMore': string;
   'scan.batchBody': string;

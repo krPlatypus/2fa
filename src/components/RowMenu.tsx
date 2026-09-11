@@ -87,6 +87,12 @@ export function RowMenu({ x, y, items, onClose }: RowMenuProps) {
     <div
       ref={ref}
       role="menu"
+      // The row copies when it is clicked, and this menu is a DOM child of it.
+      // Without these, choosing Delete would put the code on the clipboard on
+      // the way past — and pressing anywhere in the menu would leave a ripple
+      // across the row behind it.
+      onClick={event => event.stopPropagation()}
+      onPointerDown={event => event.stopPropagation()}
       style={{ position: 'fixed', top, left, width: WIDTH }}
       className="z-[80] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-dark-600 dark:bg-dark-800"
     >

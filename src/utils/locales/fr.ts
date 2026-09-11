@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "ou",
   "accounts.importFromBackup": "importer depuis une sauvegarde",
   "accounts.copied": "Copié !",
+  "accounts.copyFailed": "Le code n’a pas pu être copié — réessayez",
   "accounts.invalidSecret": "Clé non valide — modifiez ou supprimez",
   "scan.batchMore": "Code {0} sur {1} — il en reste {2} sur votre téléphone",
   "scan.batchBody": "Google Authenticator répartit un export sur plusieurs codes. Appuyez sur Suivant sur votre téléphone pour afficher le prochain, puis scannez-le ici. Les comptes des codes non scannés ne sont encore que sur votre téléphone.",

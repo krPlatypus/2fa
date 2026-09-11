@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "atau",
   "accounts.importFromBackup": "impor dari cadangan",
   "accounts.copied": "Disalin!",
+  "accounts.copyFailed": "Kode tidak dapat disalin — coba klik lagi",
   "accounts.invalidSecret": "Kunci tidak valid — edit atau hapus",
   "scan.batchMore": "Kode {0} dari {1} — {2} lagi di ponsel Anda",
   "scan.batchBody": "Google Authenticator membagi ekspor ke beberapa kode. Ketuk Berikutnya di ponsel untuk menampilkan kode selanjutnya, lalu pindai di sini. Akun pada kode yang belum dipindai masih hanya ada di ponsel Anda.",

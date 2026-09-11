@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "또는",
   "accounts.importFromBackup": "백업에서 가져오기",
   "accounts.copied": "복사됨!",
+  "accounts.copyFailed": "코드를 복사하지 못했습니다 — 다시 눌러 보세요",
   "accounts.invalidSecret": "잘못된 키 — 편집하거나 삭제하세요",
   "scan.batchMore": "{1}개 중 {0}번째 코드 — 휴대폰에 {2}개 남았습니다",
   "scan.batchBody": "Google Authenticator는 내보내기를 여러 코드로 나눕니다. 휴대폰에서 다음을 눌러 다음 코드를 표시한 뒤 여기서 스캔하세요. 스캔하지 않은 코드의 계정은 아직 휴대폰에만 있습니다.",

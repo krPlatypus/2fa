@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "或",
   "accounts.importFromBackup": "从备份导入",
   "accounts.copied": "已复制！",
+  "accounts.copyFailed": "无法复制代码 — 请再点一次",
   "accounts.invalidSecret": "密钥无效 — 请编辑或删除",
   "scan.batchMore": "第 {0} 个二维码，共 {1} 个 — 手机上还剩 {2} 个",
   "scan.batchBody": "Google Authenticator 会把导出内容拆成多个二维码。在手机上点「下一个」显示后续二维码，然后在这里扫描。未扫描的二维码中的账户目前仍只在手机上。",

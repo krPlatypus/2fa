@@ -20,6 +20,7 @@ const strings: TranslationStrings = {
   "accounts.or": "hoặc",
   "accounts.importFromBackup": "nhập từ bản sao lưu",
   "accounts.copied": "Đã sao chép!",
+  "accounts.copyFailed": "Không sao chép được mã — hãy bấm lại",
   "accounts.invalidSecret": "Khóa không hợp lệ — sửa hoặc xóa",
   "scan.batchMore": "Mã {0} trong {1} — còn {2} mã trên điện thoại",
   "scan.batchBody": "Google Authenticator chia bản xuất thành nhiều mã. Nhấn Tiếp theo trên điện thoại để hiện mã kế tiếp rồi quét tại đây. Tài khoản trong các mã chưa quét vẫn chỉ nằm trên điện thoại.",
