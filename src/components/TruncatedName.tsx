@@ -1,38 +1,71 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 /**
- * The account name, cut to the row until the pointer is on it.
+ * The account name, cut to the row until the pointer is on it, then laid out
+ * in full on one line over the top.
  *
- * It used to open as a floating card: a tooltip of our own, fixed-positioned,
- * measured against the viewport and flipped above or below the row depending
- * on room. All of that existed to get around one fact — the popup root is
- * `overflow-hidden`, so anything absolutely positioned is clipped on exactly
- * the bottom rows where the list is longest.
+ * One line, not a wrapped card. A name that wraps has to be read as a
+ * paragraph; a name that simply keeps going is read the way it was read a
+ * moment ago, from the same place, which is the point of showing it in place at
+ * all.
  *
- * Expanding in place goes around the same fact by not leaving the flow at all.
- * The name simply stops being truncated and wraps, the row grows, and the rows
- * under it move down. No measurement, no viewport arithmetic, no stacking
- * order, and nothing that a future `transform` on an ancestor can start
- * clipping.
+ * `position: fixed` rather than absolute, and that is not a style choice. The
+ * popup root is `overflow-hidden` and both the compact and hidden rows put the
+ * name inside a button that is `overflow-hidden` too, for the copy ripple — an
+ * absolutely positioned overlay is clipped by whichever of those it meets
+ * first. Fixed is measured against the viewport and no ancestor's `overflow`
+ * touches it, as long as none of them establishes a containing block with
+ * `transform`, `filter` or `will-change`. None does today; if one ever appears
+ * above this component, this is what will start being cut off.
  *
- * There is no check for whether the text is actually truncated, because none is
- * needed: a name that already fits wraps to the same single line and nothing
- * moves.
- *
- * `overflow-wrap: anywhere` earns its place on the long ones. A hostname has no
- * spaces to break at, so without it a wrapped `gitlab.spade.company` is one
- * unbreakable line that widens the row instead of filling it.
+ * Measured on hover rather than watched. One getBoundingClientRect when the
+ * pointer arrives costs nothing; a ResizeObserver per row costs it forty-five
+ * times over.
  */
 export function TruncatedName({ label, className }: { label: string; className: string }) {
-  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const [box, setBox] = useState<{ top: number; left: number; maxWidth: number } | null>(null);
+
+  /** Half the padding the overlay adds, so the glyphs do not move when it opens. */
+  const INSET_X = 6;
+  const INSET_Y = 2;
+
+  const show = () => {
+    const el = ref.current;
+    if (!el) return;
+    // Nothing is hidden, so there is nothing to reveal and no reason to paint a
+    // card over a name that is already fully readable.
+    if (el.scrollWidth <= el.clientWidth) return;
+
+    const rect = el.getBoundingClientRect();
+    setBox({
+      top: rect.top - INSET_Y,
+      left: rect.left - INSET_X,
+      // As far as the popup goes and no further. A name longer than the whole
+      // window still ends in an ellipsis, which is honest: there is no width
+      // left to give it.
+      maxWidth: window.innerWidth - rect.left + INSET_X - 8,
+    });
+  };
 
   return (
-    <span
-      className={`${className} ${open ? '[overflow-wrap:anywhere] whitespace-normal' : 'truncate'}`}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      {label}
-    </span>
+    <>
+      <span ref={ref} className={`${className} truncate`} onMouseEnter={show} onMouseLeave={() => setBox(null)}>
+        {label}
+      </span>
+      {box && (
+        <span
+          role="tooltip"
+          style={{ position: 'fixed', top: box.top, left: box.left, maxWidth: box.maxWidth }}
+          // The caller's classes carry the type — size, weight, colour — so the
+          // text does not change appearance as it opens, only length. Margins
+          // are dropped because the position is already absolute in the
+          // viewport and a margin would slide it off the word it is covering.
+          className={`${className} pointer-events-none z-[70] block truncate whitespace-nowrap rounded-md border border-gray-200 bg-white px-1.5 py-0.5 shadow-lg [margin:0] dark:border-dark-600 dark:bg-dark-800`}
+        >
+          {label}
+        </span>
+      )}
+    </>
   );
 }

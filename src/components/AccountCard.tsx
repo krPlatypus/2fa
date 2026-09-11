@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type PointerEvent } from 'react';
-import { Copy, Check, Trash2, GripVertical, Pencil, Share2 } from 'lucide-react';
+import { Copy, Check, Trash2, Pencil, Share2 } from 'lucide-react';
 import type { Account } from '@/types';
 import { accountLabel } from '@/utils/account-label';
 import { useTOTP } from '@/hooks/useTOTP';
@@ -8,6 +8,7 @@ import { createT, type Language } from '@/utils/i18n';
 import { recordAccountUsage } from '@/utils/suggestions';
 import { takePickPrompt } from '@/utils/quick-fill';
 import { AccountIcon } from './AccountIcon';
+import { RowMenu, type RowMenuItem } from './RowMenu';
 import { ProgressRing } from './ProgressRing';
 import { TruncatedName } from './TruncatedName';
 
@@ -91,6 +92,7 @@ export function AccountCard({
   const totp = useTOTP(account);
   const [copied, setCopied] = useState(false);
   const [ripple, setRipple] = useState<{ id: number; style: CSSProperties } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   /**
    * A circle that grows out of where the pointer landed.
@@ -249,7 +251,39 @@ export function AccountCard({
         ? 'text-amber-500 dark:text-amber-400'
         : 'text-[#4285F4]';
 
+  /**
+   * Share, edit and delete, on right-click.
+   *
+   * They used to be three buttons on every row, faded in on hover. In a 320px
+   * popup that is a permanent tax on the width the account name needed, paid
+   * for things done once in a while. The drag handle went the same way — the
+   * row has always been draggable by itself, and the handle only said so.
+   *
+   * Delete last and apart, which is what the divider in RowMenu is for.
+   */
+  const menuItems: RowMenuItem[] = [
+    { key: 'edit', label: t('edit.title'), Icon: Pencil, onSelect: () => onEdit(account) },
+    { key: 'share', label: t('share.title'), Icon: Share2, onSelect: () => onShare(account) },
+    {
+      key: 'delete',
+      label: t('accounts.deleteAccount'),
+      Icon: Trash2,
+      onSelect: () => onDelete(account.id),
+      danger: true,
+    },
+  ];
+
+  const openMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    setMenuAt({ x: event.clientX, y: event.clientY });
+  };
+
+  const menuNode = menuAt ? (
+    <RowMenu x={menuAt.x} y={menuAt.y} items={menuItems} onClose={() => setMenuAt(null)} />
+  ) : null;
+
   const dragProps = {
+    onContextMenu: openMenu,
     draggable,
     onDragStart: (e: React.DragEvent) => onDragStart?.(e, account.id),
     onDragOver: (e: React.DragEvent) => { e.preventDefault(); onDragOver?.(e); },
@@ -275,6 +309,7 @@ export function AccountCard({
         {...dragProps}
         className={`${baseClass} py-3 ${viewMode === 'compact' ? 'px-3 after:inset-x-3' : 'px-4 after:inset-x-4'}`}
       >
+        {menuNode}
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <TruncatedName
@@ -286,22 +321,6 @@ export function AccountCard({
             </div>
           </div>
 
-          <div className="flex flex-shrink-0 items-center gap-0.5">
-            <button
-              onClick={() => onEdit(account)}
-              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-600 dark:hover:text-gray-300"
-              title={t('edit.title')}
-            >
-              <Pencil size={13} />
-            </button>
-            <button
-              onClick={() => onDelete(account.id)}
-              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/30"
-              title={t('accounts.deleteAccount')}
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
         </div>
       </div>
     );
@@ -311,12 +330,8 @@ export function AccountCard({
   if (viewMode === 'hidden') {
     return (
       <div {...dragProps} className={`${baseClass} px-4 py-2.5 after:inset-x-4 overflow-hidden`}>
+        {menuNode}
         <div className="flex items-center gap-2">
-          {draggable && (
-            <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
-              <GripVertical size={14} />
-            </div>
-          )}
 
           <button
             onClick={handleCopy}
@@ -339,29 +354,6 @@ export function AccountCard({
             )}
           </button>
 
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0">
-            <button
-              onClick={() => onShare(account)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('share.title')}
-            >
-              <Share2 size={13} />
-            </button>
-            <button
-              onClick={() => onEdit(account)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('edit.title')}
-            >
-              <Pencil size={13} />
-            </button>
-            <button
-              onClick={() => onDelete(account.id)}
-              className="p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
-              title={t('accounts.deleteAccount')}
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
 
           {/* Same 26px ring as the compact row: at the default 40 the mode that
               hides the codes ended up the tallest of the three. */}
@@ -393,7 +385,8 @@ export function AccountCard({
       // The drag goes with the handle. A row that still reorders with no
       // affordance, and jumps 2px mid-drag when isDragOver lands, is worse than
       // a row that does not reorder; that stays a normal-view job.
-      <div className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
+      <div {...dragProps} className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
+        {menuNode}
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleCopy}
@@ -420,32 +413,6 @@ export function AccountCard({
             <CopyState copied={copied} size={14} />
           </button>
 
-          {/* Always in the flow, only faded: revealing them on hover by taking
-              them out of the layout would shove the code sideways under the
-              cursor, and the code is what the row exists to show. */}
-          <div className="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0">
-            <button
-              onClick={() => onShare(account)}
-              className="p-0.5 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('share.title')}
-            >
-              <Share2 size={12} />
-            </button>
-            <button
-              onClick={() => onEdit(account)}
-              className="p-0.5 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('edit.title')}
-            >
-              <Pencil size={12} />
-            </button>
-            <button
-              onClick={() => onDelete(account.id)}
-              className="p-0.5 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
-              title={t('accounts.deleteAccount')}
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
 
           <div className="flex-shrink-0">
             <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
@@ -458,6 +425,7 @@ export function AccountCard({
   // Normal mode
   return (
     <div {...dragProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
+      {menuNode}
       {/* One row: the icon on the left, the name and the code stacked beside
           it, the ring on the right. The icon used to sit inline with the name,
           which left the code beginning at the card edge underneath it and made
@@ -488,34 +456,6 @@ export function AccountCard({
               </div>
               {suggestedBadge}
               {groupBadge}
-              {draggable && (
-                <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
-                  <GripVertical size={14} />
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => onShare(account)}
-                className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                title={t('share.title')}
-              >
-                <Share2 size={13} />
-              </button>
-              <button
-                onClick={() => onEdit(account)}
-                className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                title={t('edit.title')}
-              >
-                <Pencil size={13} />
-              </button>
-              <button
-                onClick={() => onDelete(account.id)}
-                className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
-                title={t('accounts.deleteAccount')}
-              >
-                <Trash2 size={14} />
-              </button>
             </div>
           </div>
 
