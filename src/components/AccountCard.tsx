@@ -180,6 +180,26 @@ export function AccountCard({
   const fullName = accountLabel(account);
 
   /**
+   * The service and account the label is standing in for.
+   *
+   * Only when there is a label. Without one the title is already "issuer:
+   * name", and printing the same two words underneath it is noise.
+   *
+   * Name first, then issuer, which is the reverse of the title's order on
+   * purpose: the title says what this row is, and this line answers "which
+   * account, on what" — the account is the part being asked about.
+   */
+  const subtitle =
+    typeof account.label === 'string' && account.label.trim()
+      ? [
+          typeof account.name === 'string' ? account.name.trim() : '',
+          typeof account.issuer === 'string' ? account.issuer.trim() : '',
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      : '';
+
+  /**
    * @param compact Halves the cap and lets the badge shrink.
    *
    * The compact row is one line where the name is the only thing that can give
@@ -259,7 +279,7 @@ export function AccountCard({
           <div className="min-w-0 flex-1">
             <TruncatedName
               label={fullName}
-              className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100"
+              className="block text-sm font-medium text-gray-900 dark:text-gray-100"
             />
             <div className="mt-0.5 text-xs text-red-600 dark:text-red-400">
               {t('accounts.invalidSecret')}
@@ -307,7 +327,7 @@ export function AccountCard({
             {showIcon && <AccountIcon account={account} size={18} iconUrl={iconUrl} />}
             <TruncatedName
               label={fullName}
-              className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
+              className="min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100"
             />
             {suggestedBadge}
             {groupBadgeFor(true)}
@@ -387,7 +407,7 @@ export function AccountCard({
                 truncating. */}
             <TruncatedName
               label={fullName}
-              className="min-w-0 truncate text-sm text-gray-700 dark:text-gray-300"
+              className="min-w-0 text-sm text-gray-700 dark:text-gray-300"
             />
             {suggestedBadge}
             {groupBadgeFor(true)}
@@ -452,10 +472,20 @@ export function AccountCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between mb-1.5">
             <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              <TruncatedName
-                label={fullName}
-                className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
-              />
+              {/* The title and its subtitle stack, so the badges beside them
+                  centre against the pair rather than against the first line. */}
+              <div className="min-w-0 flex-1">
+                <TruncatedName
+                  label={fullName}
+                  className="block text-sm font-medium text-gray-900 dark:text-gray-100"
+                />
+                {subtitle && (
+                  <TruncatedName
+                    label={subtitle}
+                    className="mt-0.5 block text-[11px] leading-tight text-gray-500 dark:text-gray-400"
+                  />
+                )}
+              </div>
               {suggestedBadge}
               {groupBadge}
               {draggable && (
