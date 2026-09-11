@@ -43,7 +43,7 @@ import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
 import { forgetAccountIcons, getCustomIcons, setAccountIcon, setGroupColor, setGroupIcon, type IconStore } from '@/utils/custom-icons';
-import { isQuickFillEnabled, peekPickPrompt, setQuickFillEnabled } from '@/utils/quick-fill';
+import { isQuickFillEnabled, peekPickPrompt, publishQuickFillStrings, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
 import {
@@ -175,7 +175,14 @@ function App() {
       if (language !== 'en') {
         // Switch only once the chunk is in memory, otherwise the first paint
         // would be English and then visibly flip.
-        loadLanguage(language).then(() => setLanguage(language));
+        loadLanguage(language).then(() => {
+          setLanguage(language);
+          // Also on a plain open, not only when the language is changed: an
+          // install that has never touched the picker has published nothing,
+          // and an update that retranslates a string would otherwise leave the
+          // worker holding the old one forever.
+          void publishQuickFillStrings(language);
+        });
       }
       if (result.darkMode) {
         setDarkMode(true);
@@ -281,6 +288,10 @@ function App() {
     await loadLanguage(lang);
     setLanguage(lang);
     chrome.storage.local.set({ language: lang });
+    // The service worker draws the right-click menu item and cannot read a
+    // translation table of its own — see utils/quick-fill.ts. This is where it
+    // gets the words.
+    void publishQuickFillStrings(lang);
   };
 
   /**

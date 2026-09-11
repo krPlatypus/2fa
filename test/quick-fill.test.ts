@@ -106,6 +106,27 @@ export async function run(): Promise<void> {
   check('no account is chosen for the page', (await s.getFillCandidate('github.com', ACCOUNTS)) === null);
   await s.setSuggestionsEnabled(true);
 
+  scenario('The strings the service worker draws with');
+  {
+    await resetState();
+    // A worker cannot load a translation table: the dynamic import that fetches
+    // one is refused outside a service worker's first evaluation. So the popup
+    // writes down the handful the worker needs.
+    check('nothing is published on a fresh profile', Object.keys(await pref.readQuickFillStrings()).length === 0);
+
+    await pref.publishQuickFillStrings('ko');
+    const ko = await pref.readQuickFillStrings();
+    check('the menu title is published', typeof ko['quickFill.menu'] === 'string' && ko['quickFill.menu']!.length > 0);
+    check('and it is not the English one', ko['quickFill.menu'] !== 'Insert 2FA code');
+    // The template travels with its placeholder — only the worker knows the code.
+    check('the code line keeps its placeholder', ko['quickFill.manual']!.includes('{0}'));
+
+    check('the worker watches the key that carries them', pref.QUICK_FILL_STRINGS_KEY in areas.local);
+
+    await pref.publishQuickFillStrings('en');
+    check('changing language republishes', (await pref.readQuickFillStrings())['quickFill.menu'] === 'Insert 2FA code');
+  }
+
   scenario('The menu item preference');
 
   check('the menu item is offered by default', await pref.isQuickFillEnabled());

@@ -12,17 +12,10 @@ import { getAccounts } from '@/utils/storage';
 import { VaultLockedError } from '@/utils/vault';
 import { getFillCandidate, hostnameOf, recordAccountUsage } from '@/utils/suggestions';
 import { loadTimeOffset, tryGenerateTOTP } from '@/utils/totp';
-import { isQuickFillEnabled, notePickPrompt } from '@/utils/quick-fill';
+import { isQuickFillEnabled, notePickPrompt, readQuickFillStrings } from '@/utils/quick-fill';
 import { getOpenMode } from '@/utils/open-mode';
 import { openAppFor } from './open-mode';
-import {
-  createT,
-  detectLanguage,
-  loadLanguage,
-  matchLanguage,
-  type Language,
-  type TranslationKey,
-} from '@/utils/i18n';
+import { createT, type TranslationKey } from '@/utils/i18n';
 import { quickFillInPage, type QuickFillOutcome } from './quick-fill-page';
 
 export const MENU_ID = 'quick-fill';
@@ -42,24 +35,29 @@ const MIN_REMAINING_SEC = 2;
 type Translate = (key: TranslationKey, ...args: (string | number)[]) => string;
 
 /**
- * The language the user picked in the popup, not the browser's.
+ * The four strings this worker shows, in the language the user picked.
  *
- * `loadLanguage` pulls its table in with a dynamic import, which is how the
- * popup avoids parsing twenty languages to show one. If that import is ever
- * refused in a service worker, it fails soft: the English table is compiled in
- * statically and stays active, so the worst outcome is an English menu item,
- * never a missing one.
+ * Not loadLanguage. That reaches for a locale chunk with a dynamic import,
+ * which a service worker does not allow outside its first evaluation, so it
+ * rejected here every time and the menu item was English in all twenty
+ * languages. The popup writes the strings down instead — see
+ * utils/quick-fill.ts for why that rather than importing the tables.
+ *
+ * English is compiled in, so a key with nothing published for it falls back
+ * rather than rendering as itself. That is the state a fresh install is in
+ * until the app is opened once.
  */
 async function translator(): Promise<Translate> {
-  let language: Language = detectLanguage();
-  try {
-    const stored = (await chrome.storage.local.get('language')).language;
-    if (stored) language = matchLanguage(String(stored));
-  } catch {
-    // Preference unreadable — the detected language is still better than none.
-  }
-  await loadLanguage(language);
-  return createT(language);
+  const published = await readQuickFillStrings();
+  const english = createT('en');
+  return (key, ...args) => {
+    const template = published[key as keyof typeof published];
+    if (!template) return english(key, ...args);
+    return args.reduce<string>(
+      (text, arg, index) => text.replace(`{${index}}`, () => String(arg)),
+      template
+    );
+  };
 }
 
 /**
