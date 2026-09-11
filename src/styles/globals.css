@@ -236,6 +236,26 @@
   animation: copy-ripple 460ms cubic-bezier(0.2, 0, 0.2, 1) forwards;
 }
 
+/* Copying answered by the row itself.
+
+   The clipboard icon beside the code is gone with the button it belonged to —
+   the whole row is the target now, so the whole row is what confirms. A wash
+   that arrives at full strength and leaves, rather than fading in first: the
+   press already happened, and an acknowledgement that takes time to appear is
+   not one. */
+@keyframes copy-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.copy-flash {
+  animation: copy-flash 700ms ease-out forwards;
+}
+
 /* "Copied" arriving. Scale rather than a slide: a slide has a direction, and
    the direction is wrong in half the languages this ships in. The classes that
    used to do this — `animate-in fade-in slide-in-from-left-1` — are
@@ -266,6 +286,14 @@
   .copy-ripple,
   .copied-in {
     animation-duration: 1ms;
+  }
+
+  /* Not shortened to nothing like the two above: this one *is* the message.
+     Held flat instead, so it is still visibly green for as long as `copied`
+     lasts and then goes with it. */
+  .copy-flash {
+    animation: none;
+    opacity: 1;
   }
 }
 

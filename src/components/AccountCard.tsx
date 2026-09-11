@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type PointerEvent } from 'react';
-import { Copy, Check, Trash2, Pencil, Share2 } from 'lucide-react';
+import { Check, Trash2, Pencil, Share2 } from 'lucide-react';
 import type { Account } from '@/types';
 import { accountLabel } from '@/utils/account-label';
 import { toast } from '@/utils/ui-feedback';
@@ -14,39 +14,6 @@ import { ProgressRing } from './ProgressRing';
 import { TruncatedName } from './TruncatedName';
 
 export type ViewMode = 'normal' | 'compact' | 'hidden';
-
-/**
- * The copy affordance and its acknowledgement, crossfaded rather than swapped.
- *
- * Both icons stay mounted, one over the other, and only opacity moves. The
- * tick used to replace the clipboard outright, in the same frame the write
- * returned — so the one moment the user is looking for confirmation was the
- * one moment nothing appeared to happen. Three rows rendered that same ternary
- * with three different sizes; this is the one place it lives now.
- */
-function CopyState({ copied, size }: { copied: boolean; size: number }) {
-  return (
-    <span
-      className={`relative inline-flex flex-shrink-0 transition-opacity ${
-        copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'
-      }`}
-      style={{ width: size, height: size }}
-    >
-      <Copy
-        size={size}
-        className={`absolute inset-0 text-gray-400 dark:text-gray-500 transition-opacity duration-200 ${
-          copied ? 'opacity-0' : 'opacity-100'
-        }`}
-      />
-      <Check
-        size={size}
-        className={`absolute inset-0 text-green-600 dark:text-green-400 transition duration-200 ${
-          copied ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
-        }`}
-      />
-    </span>
-  );
-}
 
 interface AccountCardProps {
   account: Account;
@@ -141,7 +108,11 @@ export function AccountCard({
       return;
     }
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    // Shorter than the two seconds the old label sat there for. The digits are
+    // green while this lasts, and green is also how the row says "plenty of
+    // time left" — holding it makes the code look calm at the moment it is
+    // about to expire.
+    setTimeout(() => setCopied(false), 1200);
     if (currentDomain) {
       // What this copy is worth depends on why the popup is open. Opened by
       // quick fill because it could not tell which account this site wants,
@@ -253,12 +224,43 @@ export function AccountCard({
   // and the pulse held back for the red, so that the movement means "now" and
   // not merely "soon". codeUrgency owns the thresholds; see utils/totp.ts.
   const urgency = totp ? codeUrgency(totp.remaining, totp.period) : 'calm';
+  /**
+   * What the code is drawn in, and what says it was copied.
+   *
+   * The clipboard icon that used to sit beside the code is gone with the button
+   * it belonged to: it pointed at a target about a third of the row wide, and
+   * the target is now the row. So the row answers instead — a green wash
+   * through it, the digits green while it lasts, and a tick over the ring.
+   *
+   * Three of them because two of them are colour, and colour alone is not a
+   * message to everyone who uses this. The tick is the same thing said in a
+   * shape.
+   */
   const codeColour =
-    urgency === 'critical'
-      ? 'text-red-500 dark:text-red-400 animate-pulse'
-      : urgency === 'warning'
-        ? 'text-amber-500 dark:text-amber-400'
-        : 'text-[#4285F4]';
+    copied
+      ? 'text-green-600 dark:text-green-400'
+      : urgency === 'critical'
+        ? 'text-red-500 dark:text-red-400 animate-pulse'
+        : urgency === 'warning'
+          ? 'text-amber-500 dark:text-amber-400'
+          : 'text-[#4285F4]';
+
+  /** The wash, rendered inside the row — which is `relative overflow-hidden`. */
+  const copyFlash = copied ? (
+    <span
+      aria-hidden
+      className="copy-flash pointer-events-none absolute inset-0 bg-emerald-500/25 dark:bg-emerald-400/20"
+    />
+  ) : null;
+
+  /**
+   * The tick, over the ring rather than beside the code.
+   *
+   * The ring is the only other thing on the row and it keeps running
+   * underneath, so this costs no space and takes nothing away — a second
+   * without the countdown would be a second of the one number the row exists
+   * to show.
+   */
 
   /**
    * Share, edit and delete, on right-click.
@@ -349,6 +351,7 @@ export function AccountCard({
       >
         {menuNode}
         {rippleNode}
+        {copyFlash}
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <TruncatedName
@@ -365,12 +368,24 @@ export function AccountCard({
     );
   }
 
+  const ringWithTick = (size?: number) => (
+    <span className="relative flex-shrink-0">
+      <ProgressRing remaining={totp.remaining} period={totp.period} size={size} />
+      {copied && (
+        <span className="copied-in absolute inset-0 grid place-items-center rounded-full bg-white/85 text-green-600 dark:bg-dark-800/85 dark:text-green-400">
+          <Check size={size && size < 32 ? 13 : 16} aria-hidden />
+        </span>
+      )}
+    </span>
+  );
+
   // Hidden mode — just name, click whole row to copy
   if (viewMode === 'hidden') {
     return (
       <div {...rowProps} className={`${baseClass} px-4 py-2.5 after:inset-x-4`}>
         {menuNode}
         {rippleNode}
+        {copyFlash}
         <div className="flex items-center gap-2">
 
           <div className="relative flex-1 min-w-0 flex items-center gap-2 text-start">
@@ -381,19 +396,13 @@ export function AccountCard({
             />
             {suggestedBadge}
             {groupBadgeFor(true)}
-            <CopyState copied={copied} size={14} />
-            {copied && (
-              <span className="copied-in flex-shrink-0 text-xs font-medium text-green-600 dark:text-green-400">
-                {t('accounts.copied')}
-              </span>
-            )}
           </div>
 
 
           {/* Same 26px ring as the compact row: at the default 40 the mode that
               hides the codes ended up the tallest of the three. */}
           <div className="flex-shrink-0">
-            <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
+            {ringWithTick(26)}
           </div>
         </div>
       </div>
@@ -423,6 +432,7 @@ export function AccountCard({
       <div {...rowProps} className={`${baseClass} py-1.5 px-3 after:inset-x-3`}>
         {menuNode}
         {rippleNode}
+        {copyFlash}
         <div className="flex items-center gap-1.5">
           <div className="relative flex-1 min-w-0 flex items-center gap-1.5 text-start">
             {showIcon && <AccountIcon account={account} size={18} iconUrl={iconUrl} />}
@@ -441,12 +451,11 @@ export function AccountCard({
             >
               {codeDigits}
             </span>
-            <CopyState copied={copied} size={14} />
           </div>
 
 
           <div className="flex-shrink-0">
-            <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
+            {ringWithTick(26)}
           </div>
         </div>
       </div>
@@ -458,6 +467,7 @@ export function AccountCard({
     <div {...rowProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
       {menuNode}
         {rippleNode}
+        {copyFlash}
       {/* One row: the icon on the left, the name and the code stacked beside
           it, the ring on the right. The icon used to sit inline with the name,
           which left the code beginning at the card edge underneath it and made
@@ -512,12 +522,6 @@ export function AccountCard({
                   card it read as an unrelated control. The label goes after the icon
                   so appearing does not shove the icon sideways. */}
               <div className="flex items-center gap-2">
-                <CopyState copied={copied} size={16} />
-                {copied && (
-                  <span className="copied-in text-xs font-medium text-green-600 dark:text-green-400">
-                    {t('accounts.copied')}
-                  </span>
-                )}
               </div>
             </div>
 
@@ -526,7 +530,7 @@ export function AccountCard({
 
         {/* Outside the code row, so it centres against both lines rather than
             hanging off the end of one. */}
-        <ProgressRing remaining={totp.remaining} period={totp.period} />
+        {ringWithTick()}
       </div>
     </div>
   );
