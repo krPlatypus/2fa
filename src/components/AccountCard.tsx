@@ -370,19 +370,24 @@ export function AccountCard({
 
   const ringWithTick = (size?: number) => (
     <span className="relative flex-shrink-0">
-      <ProgressRing remaining={totp.remaining} period={totp.period} size={size} />
+      <ProgressRing remaining={totp.remaining} period={totp.period} size={size} muted={copied} />
       {/* Always mounted, never conditionally rendered. It used to arrive on an
           entry animation and then simply stop existing, so the seconds came
           back in a single frame — the tick faded in politely and the number
           snapped back. A transition runs both ways by itself; there is no exit
           animation to write, only an element to keep.
 
+          No background. It used to have a translucent disc so it would cover
+          the seconds, and covering them at 85% is what made both readable at
+          once. The seconds fade themselves out now (`muted`), so one thing is
+          in the ring at a time and nothing has to be hidden behind anything.
+
           Out more slowly than in. Arriving is a reply to something the user
           just did and should be immediate; leaving is the row going quiet, and
           quiet is allowed to take its time. */}
       <span
         aria-hidden
-        className={`pointer-events-none absolute inset-0 grid place-items-center rounded-full bg-white/85 text-green-600 transition-[opacity,transform] dark:bg-dark-800/85 dark:text-green-400 ${
+        className={`pointer-events-none absolute inset-0 grid place-items-center text-green-600 transition-[opacity,transform] dark:text-green-400 ${
           copied ? 'scale-100 opacity-100 duration-150' : 'scale-90 opacity-0 duration-500'
         }`}
       >

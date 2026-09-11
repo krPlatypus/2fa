@@ -6,9 +6,18 @@ interface ProgressRingProps {
   period: number;
   /** Outer diameter in px. The compact row needs a smaller ring than the card. */
   size?: number;
+  /**
+   * Fade the countdown out, for something taking its place in the middle.
+   *
+   * The copy tick used to sit on a translucent disc over the top, which left
+   * the seconds faintly legible underneath it — two numbers' worth of ink for
+   * one piece of information. Fading this out instead makes it a crossfade: one
+   * thing is in the ring at a time, and the ring itself never stops.
+   */
+  muted?: boolean;
 }
 
-export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps) {
+export function ProgressRing({ remaining, period, size = 40, muted = false }: ProgressRingProps) {
   // A record can carry a period of 0 or NaN — an old import, or the manual form
   // before it validated the field. Dividing by it painted `strokeDashoffset="NaN"`
   // and a literal "NaN" inside the ring. The TOTP default is the honest guess.
@@ -91,9 +100,12 @@ export function ProgressRing({ remaining, period, size = 40 }: ProgressRingProps
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
         <span
-          className={`font-otp font-semibold ${size < 32 ? 'text-[10px]' : 'text-xs'} ${
-            urgencyColour ?? 'text-gray-600 dark:text-gray-400'
-          }`}
+          // Out fast and back slowly, the mirror of whatever is replacing it:
+          // the arrival answers something the user just did, the return is the
+          // row going quiet again.
+          className={`font-otp font-semibold transition-opacity ${size < 32 ? 'text-[10px]' : 'text-xs'} ${
+            muted ? 'opacity-0 duration-150' : 'opacity-100 duration-500'
+          } ${urgencyColour ?? 'text-gray-600 dark:text-gray-400'}`}
         >
           {safeRemaining}
         </span>
