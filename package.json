@@ -16,7 +16,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
-    "framer-motion": "^12.31.1",
     "jsqr": "^1.4.0",
     "lucide-react": "^0.300.0",
     "otpauth": "^9.2.3",

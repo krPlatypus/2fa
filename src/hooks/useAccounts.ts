@@ -14,6 +14,11 @@ import {
 import { autoBackup, getLatestBackup } from '@/utils/auto-backup';
 import { VaultLockedError } from '@/utils/vault';
 
+/** Whether the merged read found anything the local one did not. */
+function sameAccounts(a: Account[], b: Account[]): boolean {
+  return a.length === b.length && a.every((account, i) => account.id === b[i].id);
+}
+
 export function useAccounts(vaultLocked: boolean) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,11 +41,31 @@ export function useAccounts(vaultLocked: boolean) {
     // added a forty-first would be the change announcing itself too loudly.
     if (!options.quiet) setLoading(true);
     try {
-      const data = await getAccounts();
-      setAccounts(data);
+      // Local first, then the same read again with the sync copy folded in.
+      //
+      // The merge reaches chrome.storage.sync, which is not a disk read: it
+      // goes through Chrome's sync service, and on the first popup after the
+      // browser starts it can take over a second. Waiting for it meant a blank
+      // window for that whole time, for accounts that were already on this
+      // machine. The second pass only ever adds records — it is the union of
+      // local and sync — so the list grows into place and nothing the user is
+      // already looking at moves.
+      const local = await getAccounts({ localOnly: true });
+      setAccounts(local);
       setError(null);
       // Set by the read that just happened, so it has to be sampled after it.
       setHeldCount(quarantinedCount());
+      setLoading(false);
+
+      const data = await getAccounts();
+      // Same length and same ids means the merge found nothing this device did
+      // not have, which is the normal case. Skipping the state write there is
+      // not a micro-optimisation: every card holds an interval keyed on its
+      // account, and replacing the array restarts all of them.
+      if (!sameAccounts(local, data)) {
+        setAccounts(data);
+        setHeldCount(quarantinedCount());
+      }
 
       // Trigger auto backup (non-blocking). The snapshot stores records in
       // their on-disk form, so an encrypted vault yields an encrypted backup.

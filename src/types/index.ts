@@ -23,6 +23,20 @@ export interface Account {
    * means ungrouped, which is what every account imported from anywhere else is.
    */
   group?: string;
+  /**
+   * What to show instead of "issuer: name", when those two do not read well.
+   *
+   * Display only, and deliberately so. `issuer` and `name` are what the site
+   * suggestion matches against, what the brand mark is looked up by, and what
+   * an exported otpauth:// URI carries — so renaming them to tidy up a row
+   * quietly costs a logo, a quick fill, or the spelling another authenticator
+   * reads. This field is the place to put the tidy name, and nothing matches
+   * against it.
+   *
+   * Blank or absent means the label is derived as it always was; see
+   * utils/account-label.ts.
+   */
+  label?: string;
 }
 
 /**

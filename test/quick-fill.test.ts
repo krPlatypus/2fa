@@ -88,17 +88,44 @@ export async function run(): Promise<void> {
 
   await resetState();
   check('no question, no answer', !(await pref.takePickPrompt('vercel.com')));
+  check('and nothing for the popup to name', (await pref.peekPickPrompt()) === null);
   await pref.notePickPrompt('vercel.com');
+  // The popup writes this address out above the list, which is the only place
+  // the user is told which site the code is being asked for.
+  check('the popup can name the site asked about', (await pref.peekPickPrompt()) === 'vercel.com');
   check('a different site cannot claim it', !(await pref.takePickPrompt('other.com')));
   await pref.notePickPrompt('vercel.com');
+  check('naming the site does not answer the question', (await pref.peekPickPrompt()) === 'vercel.com');
   check('the site asked about can', await pref.takePickPrompt('vercel.com'));
   check('and only once', !(await pref.takePickPrompt('vercel.com')));
+  check('an answered question is no longer named', (await pref.peekPickPrompt()) === null);
 
   scenario('Suggestions switched off');
 
   await s.setSuggestionsEnabled(false);
   check('no account is chosen for the page', (await s.getFillCandidate('github.com', ACCOUNTS)) === null);
   await s.setSuggestionsEnabled(true);
+
+  scenario('The strings the service worker draws with');
+  {
+    await resetState();
+    // A worker cannot load a translation table: the dynamic import that fetches
+    // one is refused outside a service worker's first evaluation. So the popup
+    // writes down the handful the worker needs.
+    check('nothing is published on a fresh profile', Object.keys(await pref.readQuickFillStrings()).length === 0);
+
+    await pref.publishQuickFillStrings('ko');
+    const ko = await pref.readQuickFillStrings();
+    check('the menu title is published', typeof ko['quickFill.menu'] === 'string' && ko['quickFill.menu']!.length > 0);
+    check('and it is not the English one', ko['quickFill.menu'] !== 'Insert 2FA code');
+    // The template travels with its placeholder — only the worker knows the code.
+    check('the code line keeps its placeholder', ko['quickFill.manual']!.includes('{0}'));
+
+    check('the worker watches the key that carries them', pref.QUICK_FILL_STRINGS_KEY in areas.local);
+
+    await pref.publishQuickFillStrings('en');
+    check('changing language republishes', (await pref.readQuickFillStrings())['quickFill.menu'] === 'Insert 2FA code');
+  }
 
   scenario('The menu item preference');
 

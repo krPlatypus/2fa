@@ -229,6 +229,35 @@ export function totpParams(account: Account): { period: number; digits: number }
   return { period: safePeriod(account.period), digits: safeDigits(account.digits) };
 }
 
+/** How much of a hurry a code is in. Purely a question about the clock. */
+export type CodeUrgency = 'calm' | 'warning' | 'critical';
+
+/**
+ * The two moments a code is worth showing differently, decided in one place.
+ *
+ * This used to be a bare `remaining <= 5` written once in the card and once in
+ * the ring, which is how it came to be called `isExpiringSoon` in one file and
+ * `isLowTime` in the other: two names, one number, nothing holding them
+ * together. Adding a second threshold would have made that four.
+ *
+ * Capped against the period rather than fixed at 15 and 5. Most accounts run
+ * on 30 seconds, where `period / 2` and `period / 6` *are* 15 and 5. A
+ * 15-second account would otherwise open every window already amber and spend
+ * a third of it red — the warning would be the normal state, which is no
+ * warning at all.
+ *
+ * What the two states look like is left to whatever is drawing: the code goes
+ * from blue, the ring from grey, and they should not have to agree about that
+ * to agree about the clock.
+ */
+export function codeUrgency(remaining: number, period: unknown): CodeUrgency {
+  const seconds = safePeriod(period);
+  if (!Number.isFinite(remaining)) return 'calm';
+  if (remaining <= Math.min(5, seconds / 6)) return 'critical';
+  if (remaining <= Math.min(15, seconds / 2)) return 'warning';
+  return 'calm';
+}
+
 /**
  * The code for one moment, given as a Unix timestamp in milliseconds.
  *

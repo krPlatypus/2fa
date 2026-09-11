@@ -1,74 +1,19 @@
-import { useState } from 'react';
-import { Copy, Check, Trash2, GripVertical, Pencil, Share2 } from 'lucide-react';
+import { useState, type CSSProperties, type PointerEvent } from 'react';
+import { Check, Trash2, Pencil, Share2 } from 'lucide-react';
 import type { Account } from '@/types';
-import { colorForKey } from '@/utils/qr-parser';
 import { accountLabel } from '@/utils/account-label';
+import { toast } from '@/utils/ui-feedback';
 import { useTOTP } from '@/hooks/useTOTP';
+import { codeUrgency } from '@/utils/totp';
 import { createT, type Language } from '@/utils/i18n';
 import { recordAccountUsage } from '@/utils/suggestions';
 import { takePickPrompt } from '@/utils/quick-fill';
+import { AccountIcon } from './AccountIcon';
+import { RowMenu, type RowMenuItem } from './RowMenu';
 import { ProgressRing } from './ProgressRing';
 import { TruncatedName } from './TruncatedName';
 
 export type ViewMode = 'normal' | 'compact' | 'hidden';
-
-/**
- * A coloured initial.
- *
- * The colour is not new: `generateRandomColor` has stamped one onto every
- * account on every import path since the beginning, storage has carried it, and
- * nothing has ever drawn it. This is that field finally reaching the screen.
- *
- * Deliberately not a favicon. Fetching those means one network request per
- * service, which tells whoever answers it exactly which sites this user holds
- * 2FA for — and the popup's rule is that it makes no network requests at all.
- * An initial says nothing to anyone, needs no permission, costs no bytes, and
- * works for every account rather than only for the recognised ones.
- */
-/**
- * Black or white, whichever the background can actually carry.
- *
- * White on everything was the first attempt and it left the pale half of the
- * palette unreadable — amber came in at 2.15:1, which at this size is less a
- * letter than a rumour.
- *
- * The threshold is 0.28 rather than the 0.179 where black's contrast merely
- * overtakes white's, because at 0.179 every colour we ship flips and four of
- * them gain almost nothing for it: indigo goes from 4.47:1 to 4.70:1 and stops
- * looking like itself. 0.28 sits in the gap the palette actually has, between
- * pink at L=0.248 and orange at L=0.325 — the four pale colours get black and
- * 7.5–9.8:1, the four dark ones keep white and the look they had. Arbitrary
- * colours from an imported backup are still measured, not assumed.
- */
-function readableInk(background: string): string {
-  const hex = background.replace('#', '');
-  if (hex.length !== 6) return '#ffffff';
-  const channel = (offset: number) => {
-    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
-    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-  return luminance > 0.28 ? '#000000' : '#ffffff';
-}
-
-function Avatar({ account, size }: { account: Account; size: number }) {
-  const issuer = typeof account.issuer === 'string' ? account.issuer : '';
-  const name = typeof account.name === 'string' ? account.name : '';
-  const source = (issuer || name || '?').trim();
-  // Spread rather than [0]: an emoji or any astral character is a surrogate
-  // pair, and indexing one splits it into half a character the font cannot draw.
-  const initial = ([...source][0] || '?').toUpperCase();
-  const background = account.color || colorForKey(`${issuer}:${name}:${account.id}`);
-  return (
-    <span
-      aria-hidden
-      style={{ backgroundColor: background, color: readableInk(background), width: size, height: size }}
-      className="flex-shrink-0 grid place-items-center rounded-full font-semibold leading-none"
-    >
-      <span style={{ fontSize: Math.round(size * 0.5) }}>{initial}</span>
-    </span>
-  );
-}
 
 interface AccountCardProps {
   account: Account;
@@ -79,7 +24,9 @@ interface AccountCardProps {
   language: Language;
   viewMode?: ViewMode;
   /** Off by default — see the toggle in Settings and the note beside it. */
-  showAvatar?: boolean;
+  showIcon?: boolean;
+  /** A picture the user uploaded for this account; overrides mark and initial. */
+  iconUrl?: string | null;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent, id: string) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -98,7 +45,8 @@ export function AccountCard({
   onShare,
   language,
   viewMode = 'normal',
-  showAvatar = false,
+  showIcon = true,
+  iconUrl,
   draggable,
   onDragStart,
   onDragOver,
@@ -111,19 +59,60 @@ export function AccountCard({
   const t = createT(language);
   const totp = useTOTP(account);
   const [copied, setCopied] = useState(false);
+  const [ripple, setRipple] = useState<{ id: number; style: CSSProperties } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+
+  /**
+   * A circle that grows out of where the pointer landed.
+   *
+   * On pointerdown rather than on click, because the acknowledgement people
+   * read as "it heard me" has to land before the clipboard write resolves —
+   * that write is a promise, and on a denied or slow one there was previously
+   * nothing at all between the press and the tick.
+   *
+   * Sized to the diagonal so the circle covers the corner furthest from wherever
+   * it started, and cleared on animationend rather than a timer: the CSS owns
+   * the duration, and a timeout here would be a second copy of it to keep in
+   * step.
+   */
+  const startRipple = (event: PointerEvent<HTMLElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const size = Math.hypot(box.width, box.height) * 2;
+    setRipple({
+      id: Date.now(),
+      style: {
+        width: size,
+        height: size,
+        left: event.clientX - box.left - size / 2,
+        top: event.clientY - box.top - size / 2,
+      },
+    });
+  };
 
   const handleCopy = async () => {
     if (!totp) return;
     try {
       await navigator.clipboard.writeText(totp.code);
     } catch (error) {
-      // Rejected when the document is not focused, or by policy. Swallowing it
-      // silently left the user unable to tell a failed copy from a misclick.
-      console.error('Could not copy the code to the clipboard', error);
+      // Rejected when the document is not focused, or by policy. Named rather
+      // than logged as the object: a DOMException prints as
+      // "[object DOMException]" and says nothing, and the name is the whole
+      // diagnosis — NotAllowedError with devtools holding focus is not the same
+      // problem as one without.
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.error('Could not copy the code to the clipboard —', detail);
+      // And said out loud. The console line above was added because failing
+      // silently left a failed copy indistinguishable from a misclick, which it
+      // still did — nothing on screen changed either way.
+      toast('error', t('accounts.copyFailed'));
       return;
     }
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    // Shorter than the two seconds the old label sat there for. The digits are
+    // green while this lasts, and green is also how the row says "plenty of
+    // time left" — holding it makes the code look calm at the moment it is
+    // about to expire.
+    setTimeout(() => setCopied(false), 1200);
     if (currentDomain) {
       // What this copy is worth depends on why the popup is open. Opened by
       // quick fill because it could not tell which account this site wants,
@@ -135,6 +124,19 @@ export function AccountCard({
         .catch(() => {});
     }
   };
+
+  // Keyed on the press, so a second tap restarts the circle rather than
+  // letting the first one finish on its own. Only one row renders at a time,
+  // so one node serves all three.
+  const rippleNode = ripple ? (
+    <span
+      key={ripple.id}
+      aria-hidden="true"
+      onAnimationEnd={() => setRipple(null)}
+      className="copy-ripple pointer-events-none absolute rounded-full bg-[#4285F4]"
+      style={ripple.style}
+    />
+  ) : null;
 
   const suggestedBadge = isSuggested ? (
     <span className="flex-shrink-0 text-[10px] font-medium leading-none text-[#4285F4] bg-blue-50/70 dark:bg-blue-900/25 border border-blue-200/70 dark:border-blue-800/60 px-1.5 py-[3px] rounded-full">
@@ -160,6 +162,26 @@ export function AccountCard({
   const fullName = accountLabel(account);
 
   /**
+   * The service and account the label is standing in for.
+   *
+   * Only when there is a label. Without one the title is already "issuer:
+   * name", and printing the same two words underneath it is noise.
+   *
+   * Name first, then issuer, which is the reverse of the title's order on
+   * purpose: the title says what this row is, and this line answers "which
+   * account, on what" — the account is the part being asked about.
+   */
+  const subtitle =
+    typeof account.label === 'string' && account.label.trim()
+      ? [
+          typeof account.name === 'string' ? account.name.trim() : '',
+          typeof account.issuer === 'string' ? account.issuer.trim() : '',
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      : '';
+
+  /**
    * @param compact Halves the cap and lets the badge shrink.
    *
    * The compact row is one line where the name is the only thing that can give
@@ -176,19 +198,141 @@ export function AccountCard({
 
   const groupBadge = groupBadgeFor(false);
 
-  const formattedCode = totp ? totp.code.match(/.{1,3}/g)?.join(' ') || totp.code : '';
-  const isExpiringSoon = totp ? totp.remaining <= 5 : false;
+  /**
+   * The code in groups of three, held apart by a margin rather than a space.
+   *
+   * A space is as wide as the font decides — around a quarter of an em — and
+   * `tracking-wide` widens it again on top, which left most of a digit's worth
+   * of air in the middle of a six-digit code and read as two numbers instead of
+   * one. 0.16em is a seam rather than a gap: enough to group the halves, not
+   * enough to split them.
+   *
+   * It also removes the last bidi-neutral character from between the digits.
+   * The space used to resolve to the paragraph direction under RTL and lay
+   * "123 456" out with 456 first — see the `dir="ltr"` below, which is what
+   * caught it. With nothing neutral left in there, there is nothing to
+   * resolve.
+   */
+  const codeDigits = totp
+    ? (totp.code.match(/.{1,3}/g) ?? [totp.code]).map((group, index) => (
+        <span key={index} className={index > 0 ? 'ms-[0.16em]' : undefined}>
+          {group}
+        </span>
+      ))
+    : null;
+  // Blue while there is time, amber under fifteen seconds, red under five —
+  // and the pulse held back for the red, so that the movement means "now" and
+  // not merely "soon". codeUrgency owns the thresholds; see utils/totp.ts.
+  const urgency = totp ? codeUrgency(totp.remaining, totp.period) : 'calm';
+  /**
+   * What the code is drawn in, and what says it was copied.
+   *
+   * The clipboard icon that used to sit beside the code is gone with the button
+   * it belonged to: it pointed at a target about a third of the row wide, and
+   * the target is now the row. So the row answers instead — a green wash
+   * through it, the digits green while it lasts, and a tick over the ring.
+   *
+   * Three of them because two of them are colour, and colour alone is not a
+   * message to everyone who uses this. The tick is the same thing said in a
+   * shape.
+   */
+  const codeColour =
+    copied
+      ? 'text-green-600 dark:text-green-400'
+      : urgency === 'critical'
+        ? 'text-red-500 dark:text-red-400 animate-pulse'
+        : urgency === 'warning'
+          ? 'text-amber-500 dark:text-amber-400'
+          : 'text-[#4285F4]';
+
+  /** The wash, rendered inside the row — which is `relative overflow-hidden`. */
+  const copyFlash = copied ? (
+    <span
+      aria-hidden
+      className="copy-flash pointer-events-none absolute inset-0 bg-emerald-500/25 dark:bg-emerald-400/20"
+    />
+  ) : null;
+
+  /**
+   * The tick, over the ring rather than beside the code.
+   *
+   * The ring is the only other thing on the row and it keeps running
+   * underneath, so this costs no space and takes nothing away — a second
+   * without the countdown would be a second of the one number the row exists
+   * to show.
+   */
+
+  /**
+   * Share, edit and delete, on right-click.
+   *
+   * They used to be three buttons on every row, faded in on hover. In a 320px
+   * popup that is a permanent tax on the width the account name needed, paid
+   * for things done once in a while. The drag handle went the same way — the
+   * row has always been draggable by itself, and the handle only said so.
+   *
+   * Delete last and apart, which is what the divider in RowMenu is for.
+   */
+  const menuItems: RowMenuItem[] = [
+    { key: 'edit', label: t('edit.title'), Icon: Pencil, onSelect: () => onEdit(account) },
+    { key: 'share', label: t('share.title'), Icon: Share2, onSelect: () => onShare(account) },
+    {
+      key: 'delete',
+      label: t('accounts.deleteAccount'),
+      Icon: Trash2,
+      onSelect: () => onDelete(account.id),
+      danger: true,
+    },
+  ];
+
+  const openMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    setMenuAt({ x: event.clientX, y: event.clientY });
+  };
+
+  const menuNode = menuAt ? (
+    <RowMenu x={menuAt.x} y={menuAt.y} items={menuItems} onClose={() => setMenuAt(null)} />
+  ) : null;
 
   const dragProps = {
+    onContextMenu: openMenu,
     draggable,
     onDragStart: (e: React.DragEvent) => onDragStart?.(e, account.id),
     onDragOver: (e: React.DragEvent) => { e.preventDefault(); onDragOver?.(e); },
     onDrop: (e: React.DragEvent) => { e.preventDefault(); onDrop?.(e, account.id); },
   };
 
-  const baseClass = `relative group bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
+  const baseClass = `relative group group/copy overflow-hidden cursor-pointer bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
     isDragOver ? 'border-t-2 border-[#4285F4]' : ''
   }`;
+
+  /**
+   * The whole row copies, not a button inside it.
+   *
+   * The target used to be the code and the little clipboard beside it, which is
+   * a strip about a third of the row wide in a window this narrow — and the
+   * rest of the row, the part with the name on it, did nothing at all. The
+   * ripple follows on its own: it is sized from whatever was pressed.
+   *
+   * A div rather than a button, because a button's content model is phrasing
+   * content and every one of these rows is flex boxes and an SVG. role and
+   * tabIndex put it back on the keyboard, and Enter and Space do what the
+   * button did. That also gives the row focus of its own, which is what
+   * Shift+F10 needs to reach the context menu.
+   */
+  const rowProps = {
+    ...dragProps,
+    role: 'button' as const,
+    tabIndex: 0,
+    onClick: handleCopy,
+    onPointerDown: startRipple,
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      // Space scrolls a list by default, and this one is inside a list.
+      event.preventDefault();
+      void handleCopy();
+    },
+    'aria-label': fullName,
+  };
 
   /**
    * A record whose secret cannot produce a code.
@@ -202,105 +346,80 @@ export function AccountCard({
   if (!totp) {
     return (
       <div
-        {...dragProps}
+        {...rowProps}
         className={`${baseClass} py-3 ${viewMode === 'compact' ? 'px-3 after:inset-x-3' : 'px-4 after:inset-x-4'}`}
       >
+        {menuNode}
+        {rippleNode}
+        {copyFlash}
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <TruncatedName
               label={fullName}
-              className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100"
+              className="block text-sm font-medium text-gray-900 dark:text-gray-100"
             />
             <div className="mt-0.5 text-xs text-red-600 dark:text-red-400">
               {t('accounts.invalidSecret')}
             </div>
           </div>
 
-          <div className="flex flex-shrink-0 items-center gap-0.5">
-            <button
-              onClick={() => onEdit(account)}
-              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-600 dark:hover:text-gray-300"
-              title={t('edit.title')}
-            >
-              <Pencil size={13} />
-            </button>
-            <button
-              onClick={() => onDelete(account.id)}
-              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/30"
-              title={t('accounts.deleteAccount')}
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
         </div>
       </div>
     );
   }
 
+  const ringWithTick = (size?: number) => (
+    <span className="relative flex-shrink-0">
+      <ProgressRing remaining={totp.remaining} period={totp.period} size={size} muted={copied} />
+      {/* Always mounted, never conditionally rendered. It used to arrive on an
+          entry animation and then simply stop existing, so the seconds came
+          back in a single frame — the tick faded in politely and the number
+          snapped back. A transition runs both ways by itself; there is no exit
+          animation to write, only an element to keep.
+
+          No background. It used to have a translucent disc so it would cover
+          the seconds, and covering them at 85% is what made both readable at
+          once. The seconds fade themselves out now (`muted`), so one thing is
+          in the ring at a time and nothing has to be hidden behind anything.
+
+          Out more slowly than in. Arriving is a reply to something the user
+          just did and should be immediate; leaving is the row going quiet, and
+          quiet is allowed to take its time. */}
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute inset-0 grid place-items-center text-green-600 transition-[opacity,transform] dark:text-green-400 ${
+          copied ? 'scale-100 opacity-100 duration-150' : 'scale-90 opacity-0 duration-500'
+        }`}
+      >
+        <Check size={size && size < 32 ? 13 : 16} aria-hidden />
+      </span>
+    </span>
+  );
+
   // Hidden mode — just name, click whole row to copy
   if (viewMode === 'hidden') {
     return (
-      <div {...dragProps} className={`${baseClass} px-4 py-2.5 after:inset-x-4 overflow-hidden`}>
+      <div {...rowProps} className={`${baseClass} px-4 py-2.5 after:inset-x-4`}>
+        {menuNode}
+        {rippleNode}
+        {copyFlash}
         <div className="flex items-center gap-2">
-          {draggable && (
-            <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
-              <GripVertical size={14} />
-            </div>
-          )}
 
-          <button
-            onClick={handleCopy}
-            className="flex-1 min-w-0 flex items-center gap-2 text-start group/copy"
-          >
-            {showAvatar && <Avatar account={account} size={18} />}
+          <div className="relative flex-1 min-w-0 flex items-center gap-2 text-start">
+            {showIcon && <AccountIcon account={account} size={18} iconUrl={iconUrl} />}
             <TruncatedName
               label={fullName}
-              className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
+              className="min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100"
             />
             {suggestedBadge}
             {groupBadgeFor(true)}
-            <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
-              {copied ? (
-                <Check size={14} className="text-green-600 dark:text-green-400" />
-              ) : (
-                <Copy size={14} className="text-gray-400 dark:text-gray-500" />
-              )}
-            </span>
-            {copied && (
-              <span className="flex-shrink-0 text-xs font-medium text-green-600 dark:text-green-400">
-                {t('accounts.copied')}
-              </span>
-            )}
-          </button>
-
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0">
-            <button
-              onClick={() => onShare(account)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('share.title')}
-            >
-              <Share2 size={13} />
-            </button>
-            <button
-              onClick={() => onEdit(account)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('edit.title')}
-            >
-              <Pencil size={13} />
-            </button>
-            <button
-              onClick={() => onDelete(account.id)}
-              className="p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
-              title={t('accounts.deleteAccount')}
-            >
-              <Trash2 size={13} />
-            </button>
           </div>
+
 
           {/* Same 26px ring as the compact row: at the default 40 the mode that
               hides the codes ended up the tallest of the three. */}
           <div className="flex-shrink-0">
-            <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
+            {ringWithTick(26)}
           </div>
         </div>
       </div>
@@ -327,70 +446,33 @@ export function AccountCard({
       // The drag goes with the handle. A row that still reorders with no
       // affordance, and jumps 2px mid-drag when isDragOver lands, is worse than
       // a row that does not reorder; that stays a normal-view job.
-      <div className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
+      <div {...rowProps} className={`${baseClass} py-1.5 px-3 after:inset-x-3`}>
+        {menuNode}
+        {rippleNode}
+        {copyFlash}
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleCopy}
-            className="flex-1 min-w-0 flex items-center gap-1.5 text-start group/copy"
-          >
-            {showAvatar && <Avatar account={account} size={18} />}
+          <div className="relative flex-1 min-w-0 flex items-center gap-1.5 text-start">
+            {showIcon && <AccountIcon account={account} size={18} iconUrl={iconUrl} />}
             {/* min-w-0: a flex item will not shrink below its content without
                 it, so a long name would push the code off the row instead of
                 truncating. */}
             <TruncatedName
               label={fullName}
-              className="min-w-0 truncate text-sm text-gray-700 dark:text-gray-300"
+              className="min-w-0 text-sm text-gray-700 dark:text-gray-300"
             />
             {suggestedBadge}
             {groupBadgeFor(true)}
             <span
               dir="ltr"
-              className={`ms-auto flex-shrink-0 font-mono text-base tracking-wide transition-colors ${
-                isExpiringSoon
-                  ? 'text-orange-600 dark:text-orange-400 animate-pulse'
-                  : 'text-[#4285F4]'
-              }`}
+              className={`ms-auto flex-shrink-0 font-otp text-base tracking-wide transition-colors ${codeColour}`}
             >
-              {formattedCode}
+              {codeDigits}
             </span>
-            <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
-              {copied ? (
-                <Check size={14} className="text-green-600 dark:text-green-400" />
-              ) : (
-                <Copy size={14} className="text-gray-400 dark:text-gray-500" />
-              )}
-            </span>
-          </button>
-
-          {/* Always in the flow, only faded: revealing them on hover by taking
-              them out of the layout would shove the code sideways under the
-              cursor, and the code is what the row exists to show. */}
-          <div className="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0">
-            <button
-              onClick={() => onShare(account)}
-              className="p-0.5 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('share.title')}
-            >
-              <Share2 size={12} />
-            </button>
-            <button
-              onClick={() => onEdit(account)}
-              className="p-0.5 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('edit.title')}
-            >
-              <Pencil size={12} />
-            </button>
-            <button
-              onClick={() => onDelete(account.id)}
-              className="p-0.5 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
-              title={t('accounts.deleteAccount')}
-            >
-              <Trash2 size={12} />
-            </button>
           </div>
 
+
           <div className="flex-shrink-0">
-            <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
+            {ringWithTick(26)}
           </div>
         </div>
       </div>
@@ -399,93 +481,73 @@ export function AccountCard({
 
   // Normal mode
   return (
-    <div {...dragProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
-      <div className="flex items-start justify-between mb-1.5">
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {showAvatar && <Avatar account={account} size={20} />}
-          <TruncatedName
-            label={fullName}
-            className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
-          />
-          {suggestedBadge}
-          {groupBadge}
-          {draggable && (
-            <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
-              <GripVertical size={14} />
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => onShare(account)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            title={t('share.title')}
-          >
-            <Share2 size={13} />
-          </button>
-          <button
-            onClick={() => onEdit(account)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            title={t('edit.title')}
-          >
-            <Pencil size={13} />
-          </button>
-          <button
-            onClick={() => onDelete(account.id)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
-            title={t('accounts.deleteAccount')}
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
+    <div {...rowProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
+      {menuNode}
+        {rippleNode}
+        {copyFlash}
+      {/* One row: the icon on the left, the name and the code stacked beside
+          it, the ring on the right. The icon used to sit inline with the name,
+          which left the code beginning at the card edge underneath it and made
+          the icon read as part of the title rather than as the account.
 
-      <div className="flex items-center justify-between">
-        <button
-          onClick={handleCopy}
-          className="flex-1 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-dark-700 rounded-lg p-1.5 -m-1.5 transition-colors group/copy relative"
-        >
-          {/* dir="ltr" is load-bearing, not tidiness. The code is drawn in
-              groups of three separated by a space, and under RTL the bidi
-              algorithm resolves that neutral space to the paragraph direction:
-              "123 456" lays out with 456 to the LEFT of 123, so an Arabic user
-              reading the screen left to right types 456123 and is refused. Copy
-              was never affected — it writes the raw digits — so this only ever
-              bit the read-and-type path, which is the one people use when the
-              code is going into a phone, a VPN client or an SSH prompt. */}
-          <div
-            dir="ltr"
-            className={`font-mono text-2xl tracking-wide transition-colors ${
-              isExpiringSoon
-                ? 'text-orange-600 dark:text-orange-400 animate-pulse'
-                : 'text-[#4285F4]'
-            }`}
-          >
-            {formattedCode}
-          </div>
-          {/* Sits directly after the digits rather than pushed to the far right:
-              the icon belongs to the code it copies, and across the width of the
-              card it read as an unrelated control. The label goes after the icon
-              so appearing does not shove the icon sideways. */}
-          <div className="flex items-center gap-2">
-            <div className={`transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
-              {copied ? (
-                <Check size={16} className="text-green-600 dark:text-green-400" />
-              ) : (
-                <Copy size={16} className="text-gray-400 dark:text-gray-500" />
-              )}
-            </div>
-            {copied && (
-              <span className="text-xs font-medium text-green-600 dark:text-green-400 animate-in fade-in slide-in-from-left-1 duration-200">
-                {t('accounts.copied')}
-              </span>
-            )}
-          </div>
-        </button>
+          32px because that is the size an uploaded picture is stored at, so it
+          draws one pixel to one and never softens. Anything larger would be an
+          upscale of a 32x32 PNG. */}
+      <div className="flex items-center gap-3">
+        {showIcon && <AccountIcon account={account} size={32} iconUrl={iconUrl} />}
 
-        <div className="ms-2">
-          <ProgressRing remaining={totp.remaining} period={totp.period} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between mb-1.5">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              {/* The title and its subtitle stack, so the badges beside them
+                  centre against the pair rather than against the first line. */}
+              <div className="min-w-0 flex-1">
+                <TruncatedName
+                  label={fullName}
+                  className="block text-sm font-medium text-gray-900 dark:text-gray-100"
+                />
+                {subtitle && (
+                  <TruncatedName
+                    label={subtitle}
+                    className="mt-0.5 block text-[11px] leading-tight text-gray-500 dark:text-gray-400"
+                  />
+                )}
+              </div>
+              {suggestedBadge}
+              {groupBadge}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="relative flex flex-1 items-center gap-2 text-start">
+              {/* dir="ltr" is load-bearing, not tidiness. The code is drawn in
+                  groups of three separated by a space, and under RTL the bidi
+                  algorithm resolves that neutral space to the paragraph direction:
+                  "123 456" lays out with 456 to the LEFT of 123, so an Arabic user
+                  reading the screen left to right types 456123 and is refused. Copy
+                  was never affected — it writes the raw digits — so this only ever
+                  bit the read-and-type path, which is the one people use when the
+                  code is going into a phone, a VPN client or an SSH prompt. */}
+              <div
+                dir="ltr"
+                className={`font-otp text-2xl tracking-wide transition-colors ${codeColour}`}
+              >
+                {codeDigits}
+              </div>
+              {/* Sits directly after the digits rather than pushed to the far right:
+                  the icon belongs to the code it copies, and across the width of the
+                  card it read as an unrelated control. The label goes after the icon
+                  so appearing does not shove the icon sideways. */}
+              <div className="flex items-center gap-2">
+              </div>
+            </div>
+
+          </div>
         </div>
+
+        {/* Outside the code row, so it centres against both lines rather than
+            hanging off the end of one. */}
+        {ringWithTick()}
       </div>
     </div>
   );

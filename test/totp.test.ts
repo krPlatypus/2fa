@@ -454,4 +454,74 @@ export async function run(): Promise<void> {
     if (result) accepted++;
   }
   check('none of 300 junk payloads parsed as an account', accepted === 0, `${accepted} accepted`);
+
+  scenario('How much of a hurry a code is in');
+  {
+    const u = (remaining: number, period: unknown = 30) => totp.codeUrgency(remaining, period);
+
+    check('a fresh 30-second code is calm', u(30) === 'calm' && u(16) === 'calm');
+    check('fifteen seconds left is a warning', u(15) === 'warning' && u(6) === 'warning');
+    check('five is critical, and so is nothing left', u(5) === 'critical' && u(0) === 'critical');
+
+    // The thresholds are capped against the period, not fixed. A 15-second
+    // account under a flat 15/5 would open every window already warning and
+    // spend a third of it critical — a warning that is the normal state.
+    check('a 15-second account still opens calm', u(15, 15) === 'calm' && u(8, 15) === 'calm');
+    check('and warns at half of its own period', u(7, 15) === 'warning');
+    check('and turns critical at a sixth', u(2, 15) === 'critical');
+
+    // Above 30 the caps bite instead, which is the point of them: a minute-long
+    // code has no reason to spend half a minute amber.
+    check('a 60-second code is calm at 16 seconds', u(16, 60) === 'calm');
+    check('and warns for the same last fifteen', u(15, 60) === 'warning' && u(6, 60) === 'warning');
+
+    // Records that carry a broken period reach this from storage, and a colour
+    // is not worth a thrown render.
+    check('a period of 0 falls back to 30', u(16, 0) === 'calm' && u(15, 0) === 'warning');
+    check('so does a missing one', u(15, undefined) === 'warning');
+    check('an unusable remaining is calm, not critical', u(NaN) === 'calm');
+  }
+
+  scenario('What a row is called');
+  {
+    const { accountLabel } = await import('@/utils/account-label');
+
+    check('issuer and name, joined', accountLabel({ issuer: 'GitHub', name: 'ada@work.com' }) === 'GitHub: ada@work.com');
+    check('one word in both fields is said once', accountLabel({ issuer: 'vpn', name: 'VPN' }) === 'vpn');
+    check('either on its own', accountLabel({ issuer: 'GitHub', name: '' }) === 'GitHub' && accountLabel({ issuer: '', name: 'ada' }) === 'ada');
+
+    // The whole point of the field: issuer and name stay as they are, because
+    // the site match, the brand mark and the exported URI all read them.
+    check('a label replaces the pair', accountLabel({ issuer: 'gitlab.spade.company', name: 'Gitlab root', label: '회사 GitLab' }) === '회사 GitLab');
+    check('blank or spaces is not a label', accountLabel({ issuer: 'GitHub', name: 'ada', label: '   ' }) === 'GitHub: ada');
+    check('and neither is something that is not a string', accountLabel({ issuer: 'GitHub', name: 'ada', label: 7 }) === 'GitHub: ada');
+  }
+
+  scenario('Which brand mark an issuer gets');
+  {
+    const brands = await import('@/utils/brand-icons');
+    const mark = (issuer: string | undefined | null) => brands.brandFor(issuer)?.title ?? null;
+
+    check('an exact issuer matches', mark('GitHub') === 'GitHub');
+    check('spelling and punctuation are normalised', mark('Google LLC') === 'Google' && mark('google-llc') === 'Google');
+    check('a known alias resolves', mark('Twitter') === 'X' && mark('Jira') === 'Atlassian');
+    check('a longer name falls back to its prefix', mark('GitHub Enterprise') === 'GitHub');
+
+    // Prefix matching has a floor, or a one-letter alias claims everything that
+    // starts with it. X is exactly that case.
+    check('X still matches on its own', mark('X') === 'X');
+    check('but does not swallow every issuer starting with it', mark('Xero') === null);
+
+    check('an unknown issuer gets nothing', mark('Some Internal Tool') === null);
+    check('and so does an empty or missing one', mark('') === null && mark(undefined) === null && mark(null) === null);
+
+    // Every mark has to be drawable in both themes. A near-black brand colour
+    // on a dark card is the case this guards.
+    const all = Object.values(brands.BRAND_ICONS);
+    check('the pack is not empty', all.length > 20, String(all.length));
+    check('every mark has one path and two colours', all.every(b =>
+      b.path.length > 0 && /^#[0-9a-f]{6}$/.test(b.light) && /^#[0-9a-f]{6}$/.test(b.dark)));
+    check('near-black marks get a light substitute', brands.BRAND_ICONS.github.dark !== brands.BRAND_ICONS.github.light);
+    check('and a coloured one keeps its colour', brands.BRAND_ICONS.dropbox.dark === brands.BRAND_ICONS.dropbox.light);
+  }
 }

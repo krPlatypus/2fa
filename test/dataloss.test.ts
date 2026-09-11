@@ -222,14 +222,14 @@ export async function run(): Promise<void> {
   await flush();
   const ownMeta = areas.local.vault_meta as any;
   areas.sync.vault_meta = { ...ownMeta, vaultId: 'a-different-vault', updatedAt: Date.now() + 60_000 };
-  const resolved = await vault.getVaultMeta();
+  const resolved = await vault.reconcileVaultMeta();
   check('the local vault id wins', resolved?.vaultId === ownMeta.vaultId, String(resolved?.vaultId));
   check('local metadata is left alone', (areas.local.vault_meta as any).vaultId === ownMeta.vaultId);
   check('the accounts still open with the original password', !!(await vault.unlockWithPassword(PASSWORD)));
 
   scenario('A newer copy of the SAME vault is still adopted');
   areas.sync.vault_meta = { ...ownMeta, updatedAt: (ownMeta.updatedAt ?? 0) + 60_000, iterations: ownMeta.iterations };
-  const sameVault = await vault.getVaultMeta();
+  const sameVault = await vault.reconcileVaultMeta();
   check('the password-change path still works', (sameVault?.updatedAt ?? 0) > (ownMeta.updatedAt ?? 0));
 
   // A fresh profile cannot tell "sync is empty" from "sync has not downloaded
@@ -262,4 +262,68 @@ export async function run(): Promise<void> {
   await storage.saveAccounts(ACCOUNTS);
   await flush();
   check('an area with data is written normally', syncAccountKeys().length > 0, JSON.stringify(syncAccountKeys()));
+
+  scenario('The first paint does not wait on sync');
+  {
+    const syncPref = await import('@/utils/sync-preference');
+
+    await resetState();
+    await storage.saveAccounts([ACCOUNTS[0]]);
+    await flush();
+    // An account this device has never seen, sitting in sync as if another
+    // machine had added it.
+    areas.sync.authenticator_accounts_0 = [{ ...ACCOUNTS[1], id: 'from-another-device' }];
+
+    const fast = await storage.getAccounts({ localOnly: true });
+    check('the local read returns only what is here', fast.length === 1 && fast[0].id === ACCOUNTS[0].id);
+    check('and does not write anything down', (areas.local.authenticator_accounts as any[]).length === 1);
+
+    const merged = await storage.getAccounts();
+    check('the full read brings the other device in', merged.length === 2);
+    check('and it only ever adds', merged.some(a => a.id === ACCOUNTS[0].id));
+
+    // Sync switched off. The setting removes what is up there, so set the
+    // preference directly to leave the records in place — this is about the
+    // read being skipped rather than coming back empty. Fresh state, because
+    // the merge above wrote its result to local.
+    await resetState();
+    await storage.saveAccounts([ACCOUNTS[0]]);
+    await flush();
+    areas.sync.authenticator_accounts_0 = [{ ...ACCOUNTS[1], id: 'from-another-device' }];
+
+    await syncPref.setSyncPreference(false);
+    check('with sync off the merge does not happen', (await storage.getAccounts()).length === 1);
+    check('and the records are still up there, unread', Array.isArray(areas.sync.authenticator_accounts_0));
+
+    await syncPref.setSyncPreference(true);
+    check('turning it back on merges again', (await storage.getAccounts()).length === 2);
+  }
+
+
+  scenario('A display name survives a round trip, and a hostile one does not');
+  {
+    await resetState();
+    const backupFile = await import('@/utils/backup-file');
+    const named = { ...ACCOUNTS[0], label: '회사 GitLab' };
+    await storage.importAccountList([named as any]);
+    check('the label is stored', (await storage.getAccounts())[0].label === '회사 GitLab');
+
+    // It rides in the account record, so the JSON backup carries it with no
+    // work — unlike the icons, which needed their own field in the file.
+    const text = backupFile.buildPlainBackupFile(await storage.getAccounts());
+    await resetState();
+    await storage.importAccounts(text);
+    check('and comes back from a backup', (await storage.getAccounts())[0].label === '회사 GitLab');
+
+    // From a file, so not trusted: cut rather than refused, because it is shown
+    // and not matched on.
+    await resetState();
+    await storage.importAccountList([{ ...ACCOUNTS[0], label: 'x'.repeat(500) } as any]);
+    check('an absurd one is cut to fit', (await storage.getAccounts())[0].label?.length === 64);
+
+    await resetState();
+    await storage.importAccountList([{ ...ACCOUNTS[0], label: '   ' } as any]);
+    check('and whitespace is no label at all', (await storage.getAccounts())[0].label === undefined);
+  }
+
 }

@@ -40,6 +40,7 @@ type TranslationKeys = {
   'accounts.or': string;
   'accounts.importFromBackup': string;
   'accounts.copied': string;
+  'accounts.copyFailed': string;
   'accounts.invalidSecret': string;
   'scan.batchMore': string;
   'scan.batchBody': string;
@@ -194,10 +195,18 @@ type TranslationKeys = {
   'quickFill.copied': string;
   'quickFill.manual': string;
   'quickFill.openApp': string;
+  'quickFill.pickSite': string;
 
   // Edit account
   'edit.title': string;
   'edit.save': string;
+  'edit.icon': string;
+  'edit.iconChoose': string;
+  'edit.iconClear': string;
+  'edit.iconHint': string;
+  'edit.iconFailed': string;
+  'edit.label': string;
+  'edit.labelHint': string;
 
   // Scan from screen
   'addAccount.scanFromScreen': string;
@@ -301,6 +310,10 @@ type VaultTranslationKeys = {
   'export.cxfHint': string;
   'settings.avatars': string;
   'settings.avatarsHint': string;
+  'settings.groupIcons': string;
+  'settings.groupIconsHint': string;
+  'settings.groupIconsEmpty': string;
+  'settings.groupIconNone': string;
   'settings.version': string;
   'settings.rateUs': string;
   'export.uri': string;

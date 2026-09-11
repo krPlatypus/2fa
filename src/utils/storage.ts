@@ -19,6 +19,7 @@ import { replaceAllBackups, wipeAllBackups } from './auto-backup';
 import { isSyncEnabled, setSyncPreference } from './sync-preference';
 import { deletedHere, forgetDeleted, markDeleted } from './tombstones';
 import { cleanSecret } from './totp';
+import { sealCustomIcons, unsealCustomIcons } from './custom-icons';
 
 const STORAGE_KEY = 'authenticator_accounts';
 const SYNC_OVERFLOW_KEY = 'syncOverflow';
@@ -520,10 +521,29 @@ function identityOf(record: StoredAccount): string {
 // 2) accounts in local but not sync (sync write was dropped by quota) survive.
 // Deletions don't propagate cross-device — acceptable for a 2FA app where
 // keeping a stale code is far better than losing one.
-export async function getStoredAccounts(): Promise<StoredAccount[]> {
+export interface ReadOptions {
+  /**
+   * Return the local copy without going near chrome.storage.sync.
+   *
+   * For the first paint. `chrome.storage.sync.get(null)` is not a disk read —
+   * it goes through Chrome's sync service, and on the first popup after the
+   * browser starts it can take over a second, during which the window is blank.
+   * The caller paints what is on this device and asks again without this flag a
+   * moment later; the merge only ever adds records, so the list grows into
+   * place rather than changing under the user.
+   */
+  localOnly?: boolean;
+}
+
+export async function getStoredAccounts(options: ReadOptions = {}): Promise<StoredAccount[]> {
   return retryOperation(async () => {
     const localResult = await chrome.storage.local.get(STORAGE_KEY);
     const localAccounts: StoredAccount[] = localResult[STORAGE_KEY] || [];
+
+    // Sync switched off means there is nothing up there to merge — the setting
+    // removes what was already there — so the read was pure latency. It was
+    // unguarded because only the write path ever checked the preference.
+    if (options.localOnly || !(await isSyncEnabled())) return localAccounts;
 
     let syncAccounts: StoredAccount[] = [];
     let syncReadable = false;
@@ -582,8 +602,8 @@ export async function getStoredAccounts(): Promise<StoredAccount[]> {
  * list to both stores. One transient read failure plus one click destroyed
  * every account. Errors now propagate and the UI shows a failure state.
  */
-export async function getAccounts(): Promise<Account[]> {
-  return decodeAccounts(await getStoredAccounts());
+export async function getAccounts(options: ReadOptions = {}): Promise<Account[]> {
+  return decodeAccounts(await getStoredAccounts(options));
 }
 
 export interface SaveOptions {
@@ -867,6 +887,8 @@ export interface ImportResult {
 /** Longest group name we will store. Display truncates anyway; this keeps a
  *  pathological name out of the sync chunk budget and off every record. */
 const MAX_GROUP_LENGTH = 64;
+/** Long enough for any row title, short enough that a file cannot bloat one. */
+const MAX_LABEL_LENGTH = 64;
 
 /**
  * Coerce one entry from a file into an Account, or return null if it is beyond
@@ -902,6 +924,15 @@ function normalizeImported(entry: unknown, index: number): Account | null {
     // is the one the duplicate check and the sync merge compare against.
     secret: cleanSecret(acc.secret),
   };
+
+  // Same treatment as `group`: it arrives from files as well as from our form,
+  // and it is shown rather than matched on, so a long one is cut instead of
+  // rejected.
+  if (typeof acc.label === 'string' && acc.label.trim()) {
+    normalized.label = acc.label.slice(0, MAX_LABEL_LENGTH);
+  } else {
+    delete normalized.label;
+  }
 
   if (typeof acc.group === 'string') {
     const group = acc.group.slice(0, MAX_GROUP_LENGTH);
@@ -1138,6 +1169,11 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
     // Metadata the vault does not cover but a stolen profile would expose:
     // which services the user holds, and which group they filed them under.
     await chrome.storage.local.remove([USAGE_HISTORY_KEY, ACTIVE_GROUP_KEY]).catch(() => {});
+
+    // The chosen icons say the same thing — a Google logo on disk names the
+    // service as clearly as a usage record does — but they are work the user
+    // did, so they are sealed with this vault's key rather than wiped.
+    await sealCustomIcons(dataKey).catch(() => {});
   };
 
   return { recoveryCode, commit };
@@ -1199,6 +1235,12 @@ export async function disableVault(password: string): Promise<void> {
   await replaceAllBackups(unique).catch(error => {
     console.error('Could not replace the encrypted snapshots while turning the vault off:', error);
   });
+
+  // Before the key goes: the icons are sealed with it, and after clearVaultMeta
+  // there is nothing left to open them with. Best-effort like the snapshots
+  // above — an icon that stays sealed draws as an initial, which is a worse
+  // list and not a broken one.
+  await unsealCustomIcons(dataKey).catch(() => {});
 
   await clearVaultMeta();
   await lock();

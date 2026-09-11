@@ -13,6 +13,7 @@ import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/uti
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret } from '@/utils/totp';
 import { createT, type Language } from '@/utils/i18n';
+import { getCustomIcons, mergeCustomIcons } from '@/utils/custom-icons';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
 import { describeImport } from '@/utils/import-message';
 import { importURIList, looksLikeURIList } from '@/utils/uri-import';
@@ -25,6 +26,7 @@ import {
   uriBackupFileName,
   downloadBackupFile,
   isEncryptedBackupFile,
+  iconsFromPlainBackup,
   readEncryptedBackupFile,
 } from '@/utils/backup-file';
 import { buildCxfFile, cxfFileName, isCxfFile, readCxfFile } from '@/utils/cxf';
@@ -57,13 +59,20 @@ export async function importBackupText(
   }
 
   if (!isEncryptedBackupFile(text)) {
-    return await importAccounts(text);
+    const result = await importAccounts(text);
+    // After the accounts, and only if they landed: an icon keyed to an account
+    // that was never stored is a stale entry waiting to be swept.
+    await mergeCustomIcons(iconsFromPlainBackup(text)).catch(() => {});
+    return result;
   }
 
   const password = await promptForPassword();
   if (!password) return null;
 
-  return await importAccountList(await readEncryptedBackupFile(text, password));
+  const contents = await readEncryptedBackupFile(text, password);
+  const result = await importAccountList(contents.accounts);
+  await mergeCustomIcons(contents.icons).catch(() => {});
+  return result;
 }
 
 /** "Restored" plus, if any entry was beyond saving, how many and that they were skipped. */
@@ -126,14 +135,19 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         if (!proceed) return;
       }
 
+      // Only our own two formats carry them. CXF is another vendor's schema and
+      // the URI list is bare otpauth:// lines that other authenticators read —
+      // adding anything to either would be adding it to somebody else's format.
+      const icons = format === 'encrypted' || format === 'plain' ? await getCustomIcons() : undefined;
+
       const contents =
         format === 'encrypted'
-          ? await buildEncryptedBackupFile(accounts, exportPassword)
+          ? await buildEncryptedBackupFile(accounts, exportPassword, icons)
           : format === 'cxf'
             ? buildCxfFile(accounts)
             : uri
               ? uri.text
-              : buildPlainBackupFile(accounts);
+              : buildPlainBackupFile(accounts, icons);
 
       downloadBackupFile(
         contents,

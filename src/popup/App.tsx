@@ -17,6 +17,7 @@ import { ReviewPrompt } from '@/components/ReviewPrompt';
 import { Logo } from '@/components/Logo';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { SettingToggle } from '@/components/SettingToggle';
+import { GroupIconSettings } from '@/components/GroupIconSettings';
 import { LockScreen } from '@/components/LockScreen';
 import { VaultPrompt } from '@/components/VaultPrompt';
 import { VaultSettings } from '@/components/VaultSettings';
@@ -41,7 +42,8 @@ import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/uti
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
-import { isQuickFillEnabled, setQuickFillEnabled } from '@/utils/quick-fill';
+import { forgetAccountIcons, getCustomIcons, setAccountIcon, setGroupColor, setGroupIcon, type IconStore } from '@/utils/custom-icons';
+import { isQuickFillEnabled, peekPickPrompt, publishQuickFillStrings, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
 import {
@@ -144,13 +146,15 @@ function App() {
   // forty-five rows is a change to it whether or not they wanted one — in the
   // compact row it also costs the account name 24px of the width this release
   // just spent getting back.
-  const [showAvatars, setShowAvatars] = useState(false);
+  const [showAvatars, setShowAvatars] = useState(true);
   // Seeded from the synchronous mirror so the window opens at the chosen size
   // instead of resizing once chrome.storage answers.
   const [popupSize, setPopupSize] = useState<PopupSize>(cachedPopupSize);
   const [openMode, setOpenModeState] = useState<OpenMode>('popup');
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
+  const [pickSite, setPickSite] = useState<string | null>(null);
+  const [customIcons, setCustomIcons] = useState<IconStore>({ accounts: {}, groups: {} });
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   const [showPromoBanner, setShowPromoBanner] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
@@ -171,12 +175,22 @@ function App() {
       if (language !== 'en') {
         // Switch only once the chunk is in memory, otherwise the first paint
         // would be English and then visibly flip.
-        loadLanguage(language).then(() => setLanguage(language));
+        loadLanguage(language).then(() => {
+          setLanguage(language);
+          // Also on a plain open, not only when the language is changed: an
+          // install that has never touched the picker has published nothing,
+          // and an update that retranslates a string would otherwise leave the
+          // worker holding the old one forever.
+          void publishQuickFillStrings(language);
+        });
       }
       if (result.darkMode) {
         setDarkMode(true);
       }
-      setShowAvatars(result.showAvatars === true);
+      // On unless switched off. It was off by default when it could only draw a
+      // letter; now the recognised services draw their own mark, which is what
+      // the list looked like it should have all along.
+      setShowAvatars(result.showAvatars !== false);
       if (result.viewMode) {
         setViewMode(result.viewMode);
       }
@@ -274,6 +288,10 @@ function App() {
     await loadLanguage(lang);
     setLanguage(lang);
     chrome.storage.local.set({ language: lang });
+    // The service worker draws the right-click menu item and cannot read a
+    // translation table of its own — see utils/quick-fill.ts. This is where it
+    // gets the words.
+    void publishQuickFillStrings(lang);
   };
 
   /**
@@ -348,10 +366,14 @@ function App() {
 
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
+      // The label is searched alongside the two fields, not instead of them: it
+      // hides the issuer from the row, and someone who remembers the issuer
+      // should still find the account by it.
       list = list.filter(
         (acc) =>
           acc.name.toLowerCase().includes(query) ||
-          acc.issuer.toLowerCase().includes(query)
+          acc.issuer.toLowerCase().includes(query) ||
+          (acc.label ?? '').toLowerCase().includes(query)
       );
     }
 
@@ -758,6 +780,57 @@ function App() {
     getSuggestedAccountId(currentDomain, accounts).then(setSuggestedAccountId);
   }, [currentDomain, accounts, suggestionsOn]);
 
+  // Quick fill sends people here when it will not fill by itself, and the site
+  // it was asked about is the one thing this window cannot work out on its own:
+  // the tab under a lookalike domain is the active tab either way, and a
+  // suggestion pinned to the top of the list reads as an endorsement of it.
+  // So the question gets asked in words, with the address written out.
+  //
+  // Peeked, not consumed. The answer is whichever account gets copied next,
+  // and AccountCard is what spends the question on it.
+  useEffect(() => {
+    peekPickPrompt().then(setPickSite);
+  }, []);
+
+  /**
+   * The icons the user chose, loaded here rather than per card.
+   *
+   * One read for the whole list: the store is a single key, so a card reading
+   * it would be twenty reads of the same object, and under a vault twenty
+   * decryptions of it.
+   *
+   * Reloaded when the list changes, which is also where stale entries get
+   * swept: the store is keyed by account id and a deleted account leaves its
+   * picture behind. Doing it here rather than in the delete handler means an
+   * account deleted on another surface is cleaned up too.
+   */
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      if (accounts.length > 0) await forgetAccountIcons(accounts.map(account => account.id)).catch(() => {});
+      const store = await getCustomIcons();
+      if (live) setCustomIcons(store);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [accounts]);
+
+  const handleIconChange = async (accountId: string, dataUrl: string | null) => {
+    await setAccountIcon(accountId, dataUrl);
+    setCustomIcons(await getCustomIcons());
+  };
+
+  const handleGroupIconChange = async (group: string, iconName: string | null) => {
+    await setGroupIcon(group, iconName);
+    setCustomIcons(await getCustomIcons());
+  };
+
+  const handleGroupColorChange = async (group: string, color: string | null) => {
+    await setGroupColor(group, color);
+    setCustomIcons(await getCustomIcons());
+  };
+
   // Nothing renders until we know whether there is a vault: the alternative is
   // a flash of either the account list or the "no accounts yet" empty state,
   // and on a 2FA app the latter reads as "my accounts are gone".
@@ -1050,6 +1123,16 @@ function App() {
             }}
           />
 
+          {/* Directly under the account-icon switch: both answer "what is the
+              picture next to this thing", one for rows and one for chips. */}
+          <GroupIconSettings
+            groups={groups.map(group => group.name)}
+            styles={customIcons.groups}
+            onIcon={handleGroupIconChange}
+            onColor={handleGroupColorChange}
+            language={language}
+          />
+
           <SettingToggle
             label={t('settings.suggested')}
             hint={t('settings.suggestedHint')}
@@ -1175,6 +1258,7 @@ function App() {
           active={activeGroup}
           onChange={handleGroupChange}
           language={language}
+          styles={customIcons.groups}
         />
       )}
 
@@ -1235,6 +1319,18 @@ function App() {
           )
         ) : (
           <div className="bg-white dark:bg-dark-800 pb-20">
+            {pickSite && (
+              <div className="px-4 py-2.5 bg-gray-50 dark:bg-dark-900/60 border-b border-gray-200 dark:border-dark-700">
+                <div className="text-[11px] text-gray-500 dark:text-gray-400">{t('quickFill.pickSite')}</div>
+                {/* The hostname as the browser normalised it, not the base
+                    domain the matching runs on: `login.example.com.evil.tld`
+                    and an internationalised lookalike both have to be readable
+                    as what they are, and URL gives back punycode for the
+                    second. Whole, wrapped, and in the weight of a heading —
+                    this line is the entire point of the strip. */}
+                <div className="text-[13px] font-medium text-gray-900 dark:text-gray-100 break-all">{pickSite}</div>
+              </div>
+            )}
             {suggestedAccount && (
               <>
                 {/* AccountCard must stay the last child so its own `last:after:hidden`
@@ -1257,7 +1353,8 @@ function App() {
                     onShare={setSharingAccount}
                     language={language}
                     viewMode={viewMode}
-                    showAvatar={showAvatars}
+                    showIcon={showAvatars}
+                    iconUrl={customIcons.accounts[suggestedAccount.id]}
                     draggable={false}
                     currentDomain={currentDomain}
                     // Same account, same badge: pinned at the top it was the one
@@ -1278,7 +1375,8 @@ function App() {
                 onShare={setSharingAccount}
                 language={language}
                 viewMode={viewMode}
-                showAvatar={showAvatars}
+                showIcon={showAvatars}
+                iconUrl={customIcons.accounts[account.id]}
                 // handleDrop rewrites the order of the full list, so dragging
                 // inside a filtered view would reorder against indices the user
                 // cannot see. Off while filtered, as it already is while searching.
@@ -1353,6 +1451,8 @@ function App() {
           onSave={handleEditAccount}
           language={language}
           groups={groups.map(group => group.name)}
+          iconUrl={customIcons.accounts[editingAccount.id]}
+          onIconChange={(dataUrl) => handleIconChange(editingAccount.id, dataUrl)}
         />
       )}
 

@@ -38,4 +38,40 @@ export async function run(): Promise<void> {
   // back is the text heuristic, which matches a1 because its account name is an
   // address at that domain — a fresh guess, not the erased history.
   check('the learned preference does not come back', (await s.getSuggestedAccountId('example.com', ACCOUNTS)) === 'a1');
+
+  scenario('Filling a page is stricter than suggesting one');
+  await resetState();
+
+  // Nothing learned yet: the name is all there is, and it is enough. This is
+  // the first sign-in, which has to keep working.
+  check(
+    'a name match fills a site nothing is known about',
+    (await s.getFillCandidate('github.com', ACCOUNTS))?.source === 'text'
+  );
+
+  // A copy is not evidence about a page: it carries the hostname of whatever
+  // tab was open. An account known only by copies has no home domain yet, so
+  // there is nothing for another domain to be the odd one out from.
+  await s.recordAccountUsage('unrelated-domain.com', 'a1', 'copy');
+  check(
+    'a copy elsewhere does not stop a name match filling',
+    (await s.getFillCandidate('github.com', ACCOUNTS))?.source === 'text'
+  );
+
+  await s.recordAccountUsage('github.com', 'a1', 'site');
+  check(
+    'the site it was used on still fills, now from history',
+    (await s.getFillCandidate('github.com', ACCOUNTS))?.source === 'history'
+  );
+  check('a subdomain of it counts as the same site', (await s.getFillCandidate('gist.github.com', ACCOUNTS)) !== null);
+
+  // The lookalike. `github` is a substring of both, so the name match fires on
+  // this domain exactly as it fires on the real one — and it is the only thing
+  // that stands between the code and the page.
+  check('a lookalike domain is asked about, not filled', (await s.getFillCandidate('github-login.com', ACCOUNTS)) === null);
+  check(
+    'the popup still names the account there — asking is not refusing',
+    (await s.getSuggestedAccountId('github-login.com', ACCOUNTS)) === 'a1'
+  );
+
 }

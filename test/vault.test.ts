@@ -107,7 +107,7 @@ export async function run(): Promise<void> {
   check('exposes no secret', !file.includes('JBSWY3DPEHPK3PXP'));
   check('exposes no service name', !file.includes('GitHub'));
   check('rejects a wrong password', await throwsNamed('WrongExportPasswordError', () => backupFile.readEncryptedBackupFile(file, 'nope')));
-  check('round-trips exactly', JSON.stringify(await backupFile.readEncryptedBackupFile(file, 'file password')) === JSON.stringify(accounts));
+  check('round-trips exactly', JSON.stringify((await backupFile.readEncryptedBackupFile(file, 'file password')).accounts) === JSON.stringify(accounts));
   check('a plain export is not mistaken for an encrypted one', !backupFile.isEncryptedBackupFile(backupFile.buildPlainBackupFile(accounts)));
 
   // --- disabling ---------------------------------------------------------

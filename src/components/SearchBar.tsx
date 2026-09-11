@@ -19,7 +19,28 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full bg-gray-50 dark:bg-dark-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg ps-9 pe-9 py-2 border border-gray-200 dark:border-dark-600 focus:border-gray-300 dark:focus:border-dark-500 focus:ring-1 focus:ring-gray-200 dark:focus:ring-dark-600 outline-none transition-all"
+          className="peer w-full border-0 bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm ps-9 pe-9 py-2 outline-none"
+        />
+        {/* The only focus indicator there is, which is why it is 2px of the
+            app's accent and not a hairline: the field has no border and no fill
+            to change, and `outline-none` was already here.
+
+            One transition on scaleX does both directions. Focus takes it to
+            full width from the leading edge; losing focus transitions the same
+            property back to 0 and it retracts the way it came, because that is
+            what a transition is — an @keyframes pair would have needed a
+            second animation, and a state to remember which one to play.
+
+            `origin-left` flips to `origin-right` under RTL: the leading edge is
+            the one the caret starts at, not the one on the left. Sibling of the
+            input rather than a ::after on it, because a replaced element like
+            an input has no pseudo-elements to give.
+
+            Motion off, the transition duration goes to zero and the line still
+            appears — the end state is not the animation. */}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left rtl:origin-right scale-x-0 rounded-full bg-[#4285F4] transition-transform duration-300 ease-out peer-focus:scale-x-100"
         />
         {value && (
           <button
