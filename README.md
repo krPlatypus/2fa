@@ -1,450 +1,271 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
-  <img src=".github/assets/banner-light.png" alt="Authenticator" width="360">
-</picture>
+# 2FA 인증기 — 개인 포크
 
-**TOTP codes in Chrome. No servers, no analytics, no host permissions.**
+**[authenticator-sh/2fa](https://github.com/authenticator-sh/2fa) v1.13.0에서 갈라져 나온 개인용 빌드**
 
-[![Chrome Web Store](https://img.shields.io/chrome-web-store/v/ebhcbenbgjmaebpgbldimndmfomjmphd?label=chrome%20web%20store&color=4285f4)](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd)
-[![Users](https://img.shields.io/chrome-web-store/users/ebhcbenbgjmaebpgbldimndmfomjmphd?label=users&color=4285f4)](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd)
-[![Rating](https://img.shields.io/chrome-web-store/rating/ebhcbenbgjmaebpgbldimndmfomjmphd?label=rating&color=e37400)](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd/reviews)
-[![Checks](https://img.shields.io/github/actions/workflow/status/authenticator-sh/2fa/checks.yml?branch=main&label=checks)](https://github.com/authenticator-sh/2fa/actions/workflows/checks.yml)
-[![Host permissions: none](https://img.shields.io/badge/host_permissions-none-34a853)](#permissions)
-[![License: MIT](https://img.shields.io/badge/license-MIT-4285f4)](LICENSE)
-
-[Install](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd) ·
-[Website](https://authenticator.sh) ·
-[How it works](https://authenticator.sh/how-it-works) ·
-[Security](https://authenticator.sh/security) ·
-[Privacy](https://authenticator.sh/privacy) ·
-[FAQ](https://authenticator.sh/faq) ·
-[Feature requests](https://authenticator.featurebase.app)
-
-<img src=".github/assets/screenshot.png" alt="The extension's popup: a searchable list of accounts, each with its current code and the seconds left on it" width="440">
+<img src=".github/assets/example.png" alt="계정 목록: 브랜드 로고, 표시 이름, 그 아래 계정과 서비스" width="380">
 
 </div>
 
-A privacy-focused TOTP authenticator for Chrome. We receive none of your data on any path. Accounts are stored by the browser, and optionally synced through your own Google account — see [Where your data lives](#where-your-data-lives).
+---
 
-## Features
+## 개요
 
-- TOTP code generation (SHA-1, SHA-256, SHA-512; 6 to 10 digits, 7 included — it is issued in the wild). Counter-based HOTP is deliberately refused rather than stored as TOTP, which would look healthy and never once be valid.
-- QR code import from image upload, the visible tab, or a camera
-- Right-click a code field on any site to insert the code for it, without opening the popup (see [Inserting a code into a page](#inserting-a-code-into-a-page))
-- **Optional password protection** — AES-256-GCM encryption of every account
-  record and backup, with a recovery code so a forgotten password is not a
-  dead end (see [Password protection](#password-protection))
-- **Passkey unlock** — open a password-protected vault with Touch ID, Windows
-  Hello or your phone through the WebAuthn PRF extension, with no new permission
-  (see [Unlocking with a passkey](#unlocking-with-a-passkey))
-- **Share an account's codes by link**, for five minutes to an hour — the link
-  carries pre-computed codes, never the secret, and there is no server behind
-  it (see [Sharing codes by link](#sharing-codes-by-link))
-- **Open where you need it** — the toolbar icon can open the popup, a floating
-  window, or Chrome's side panel; the last two stay put while you switch tabs,
-  which a popup cannot do because it closes as soon as it loses focus
-- **Password-protected backup files** on export
-- Automatic local backups in IndexedDB with rotation (7 latest)
-- Export and import for cross-device migration, including
-  [Credential Exchange Format](#credential-exchange-format) — the FIDO Alliance
-  interchange format other password managers and authenticators can read
-- 20 UI languages, chosen from the browser's own language on first open and overridable in Settings
-- Works fully offline — the popup makes no network request to render
+### 왜 만들었나
 
-## Permissions
+원본은 잘 만들어진 확장 프로그램이다. 호스트 권한이 없고, 화면을 그리는 것만으로
+네트워크 요청을 하지 않고, 스토어에 올라간 빌드가 소스에서 나온 것과 바이트 단위로
+같다는 것이 실제로 검증된다. 이 포크는 그 성질들을 **지키면서** 시작했고, 아래
+모든 변경은 그 조건 아래에서 이뤄졌다.
 
-The extension requests the **minimum permissions** required for its functionality:
+바꾸고 싶었던 것은 두 가지였다.
 
-| Permission   | Reason                                                                          |
-|--------------|---------------------------------------------------------------------------------|
-| `storage`    | Store accounts and settings in `chrome.storage` (local, session and optional sync) |
-| `activeTab`  | Read the current tab's hostname to highlight the matching account, capture the tab for QR scanning, and — only when you pick the right-click item — insert a code into that tab |
-| `contextMenus` | Add the single "Insert 2FA code" item to the right-click menu on text fields |
-| `scripting`  | Run the insert routine in the tab, for that one invocation, under the `activeTab` grant the click provides |
-| `sidePanel`  | Open the app in Chrome's side panel, when you pick that in Settings → Open as. It grants the extension nothing about the browser or its tabs: it is what lets an extension page be docked beside them |
+**첫째, 스토어 스크린샷이 보여주는 목록이 실제로는 없었다.** 홍보 이미지에는
+서비스마다 로고가 붙고 그룹 칩에 아이콘이 있는 목록이 나오는데, 실제 코드에는
+색깔 원 안의 첫 글자 하나뿐이었다. 그것도 기본값이 꺼짐이었다.
 
-Camera scanning needs no manifest permission: it uses the browser's standard
-camera prompt on an extension page, granted per extension origin and revocable
-in site settings. It is never requested until the scanner is opened.
+**둘째, 한국어로 쓰기에 불편한 지점들이 있었다.** `gitlab.spade.company: Gitlab root`
+같은 제목은 320px 팝업에서 양쪽 다 잘린다. 그런데 그 두 필드는 표시 말고도 사이트
+매칭·로고 조회·otpauth 내보내기를 담당해서, 보기 좋게 고치면 기능이 깨진다.
 
-The extension does **not** request:
-- `host_permissions` of any kind
-- Content scripts — nothing of this extension is declared to run on any page,
-  and nothing of it is running on a page you have not invoked it from
-- `tabs`, `cookies`, `webRequest`, or any other broad permissions
+여기까지는 기능 이야기다. 코드를 읽다 보니 **보안과 성능에서 손봐야 할 것들**이
+따로 나왔고, 그쪽이 결과적으로 더 큰 변경이 됐다. quick fill이 유사 도메인에
+코드를 조용히 채워 넣던 경로, 팝업이 뜨기 전에 기다리던 동기화 읽기 세 번,
+서비스 워커에서 스무 개 언어 전부가 영어로 나오던 버그 같은 것들이다.
 
-This means the extension **cannot read or modify any page on its own**. Two
-things happen on your instruction and nowhere else: under `activeTab` it reads
-the active tab's hostname while the popup is open, to highlight the account
-matching that site — switchable off in Settings, which also erases the history
-it collected — and it inserts a code into a page when you pick it out of the
-right-click menu.
+### 원본에서 그대로 가져가는 것
 
-### Inserting a code into a page
+- 호스트 권한 없음. 권한은 `storage`, `activeTab`, `contextMenus`, `scripting`, `sidePanel` 다섯 개뿐
+- 팝업이 화면을 그리는 것만으로 네트워크 요청을 하지 않음
+- 시크릿은 기기 밖으로 나가지 않음. 금고(AES-256-GCM / PBKDF2 600k)를 켜면 디스크에서도 암호문
+- MIT 라이선스
 
-Right-clicking a text field offers one item, "Insert 2FA code" — removable in
-Settings. The same action has a keyboard shortcut, `Ctrl+Shift+Y`
-(`⌘⇧Y` on macOS), which can be changed or cleared at
-`chrome://extensions/shortcuts`. Choosing either is what grants `activeTab`: for
-that one invocation, in that one tab, the extension may put the code for the
-site into the field you clicked. The grant ends with the invocation, nothing is
-left behind in the page, and no code of ours runs there again until you ask
-again.
+---
 
-Which account is chosen is deliberately conservative. An account you have
-already used *on that site* wins — inserted into a field there, or picked when
-this asked you which account the site wanted. Failing that, the site's name has
-to match exactly one account. Anything less certain — several plausible
-accounts, none at all, or a locked vault — opens the popup and lets you pick,
-because these forms often submit themselves on the last digit and a wrong code
-spends one of the few attempts the service allows.
+## 설치
 
-A code copied out of the popup is deliberately not treated as evidence about
-the site behind it. Codes get copied for things that are not the page at all —
-a VPN client, an SSH prompt, a phone — so a copy never displaces the account a
-site names, and never authorises inserting anything on its own.
-
-If the field will not take the code — some sites build their inputs in ways no
-insertion survives — it is copied to your clipboard instead and a note in the
-page says so. The fallback is the point: the worst case is the paste you would
-have done anyway.
-
-## Password protection
-
-Password protection is **optional and off by default**. With it off, account
-records are stored unencrypted in `chrome.storage.local`, protected by the OS
-user account and the Chrome profile — the same model as most authenticator
-extensions. With it on:
-
-| Property            | Value                                                          |
-|---------------------|----------------------------------------------------------------|
-| Cipher              | AES-256-GCM (random 96-bit IV per record)                      |
-| Key derivation      | PBKDF2-HMAC-SHA256, 600,000 iterations, 128-bit random salt    |
-| Master key          | 256-bit random, generated once; the password only wraps it     |
-| Fingerprints        | HMAC-SHA256 under an HKDF subkey of the master key             |
-| Unlocked key store  | `chrome.storage.session` (memory only, cleared on browser exit) |
-| Auto-lock           | Every open / 5 / 15 / 60 min idle / until browser closes       |
-
-Design notes:
-
-- **Two-level keys.** Data is never encrypted with a password-derived key
-  directly. A random master key encrypts the records; PBKDF2 output only wraps
-  that master key. Changing the password rewrites 32 bytes rather than
-  re-encrypting every record — the bulk rewrite is where data gets lost.
-- **Recovery code.** A 160-bit code independently wraps the same master key, so
-  a forgotten password is recoverable. It is shown once, must be typed back to
-  confirm, and is rotated after each use.
-- **What is encrypted.** The entire account record except its `id` and
-  fingerprint — including the service name, so a stolen profile leaks no
-  metadata about which services the user has accounts with.
-- **Backups too.** IndexedDB snapshots store the already-encrypted records.
-  Enabling the vault wipes every pre-existing cleartext copy (local, sync and
-  all snapshots) after a decrypt-and-compare round trip verifies the encrypted
-  data reads back identically. Verification happens before anything is deleted.
-- **Export files** carry their own salt and a password chosen at export time,
-  independent of the vault, so a backup stays openable on a machine that has no
-  vault configured.
-
-**Threat model.** This protects data at rest: a stolen profile directory, an
-infostealer that exfiltrates browser data, or account records reaching Google's
-servers through Chrome sync. It does **not** protect against malware running as
-the user while the vault is unlocked, or a keylogger capturing the password.
-
-Crypto lives in [`src/utils/crypto.ts`](src/utils/crypto.ts) and
-[`src/utils/vault.ts`](src/utils/vault.ts); no cryptographic primitive is
-hand-rolled — all of it is WebCrypto.
-
-## Unlocking with a passkey
-
-Available once password protection is on, and off until you add one. A passkey
-becomes a **third wrapper around the same master key**, alongside the password
-and the recovery code.
-
-| Property           | Value                                                        |
-|--------------------|--------------------------------------------------------------|
-| Mechanism          | WebAuthn `prf` extension, `eval.first` over a 256-bit stored salt |
-| Key derivation     | HKDF-SHA256 over the 32-byte PRF output, `info` = `authenticator-vault-passkey-v1` |
-| Relying party      | the extension's own origin; **no host permissions**          |
-| User verification  | `required` — presence alone must not release the wrapper     |
-| Stored in metadata | credential id, PRF salt, wrapped master key. Never the master key or the PRF output |
-
-Design notes:
-
-- **Additive, never exclusive.** `attachPasskey` only ever adds a wrapper;
-  nothing in the codebase removes `wrappedByPassword` or `wrappedByRecovery`. A
-  lost passkey costs convenience, not accounts — a passkey-only vault would be a
-  new way to destroy every seed.
-- **Verified before it is written.** The wrapper is built, unwrapped again and
-  compared byte for byte with the key it came from, all in memory. Only a match
-  reaches storage, so an authenticator that cannot reproduce its own PRF output
-  never leaves behind a wrapper that opens nothing.
-- **A password change does not break it.** Only the password wrapper is rebuilt;
-  the master key is unchanged, so the passkey keeps working. Covered by a test,
-  because the failure would have been silent until the day it mattered.
-- **It runs in its own window.** [`src/passkey/`](src/passkey/) is a full
-  extension page, opened with `chrome.windows.create({type: 'popup'})` — no
-  permission required. Chrome destroys the action popup on focus loss and the
-  authenticator prompt takes focus, so the ceremony cannot complete inside the
-  popup at all; a window keeps it a dialog rather than an opened tab, and falls
-  back to a tab if the window is refused.
-- **Uneven platform support is expected.** PRF is solid on Android, Windows 11
-  25H2+, macOS 15+ and iOS 18.4+, and absent on Firefox for Android. The setting
-  hides itself where the API is missing and reports the case where an
-  authenticator declines PRF rather than failing obscurely.
-- **The popup listens instead of polling.** The ceremony happens in another
-  context, so the popup subscribes to `chrome.storage.onChanged`: a session
-  change re-reads the lock state, and a `vault_meta` change re-reads whether a
-  passkey is registered. Without this the popup sat on its lock screen with the
-  vault already unlocked behind it until it was closed and reopened, and the
-  settings panel kept offering to add a passkey that already existed. After a
-  successful unlock the ceremony window also tries `chrome.action.openPopup()`
-  — best effort, since it needs a user gesture that the biometric prompt may
-  have outlived and does not exist before Chrome 127 — and then closes itself.
-- **A one-shot hand-off crosses the context boundary.** The ceremony page is a
-  separate JS context, and with auto-lock on *every open* the unlocked key is
-  deliberately never written to `chrome.storage.session` — so without a hand-off,
-  registering a passkey is impossible on that setting and unlocking with one
-  silently does nothing. Both were reproduced before the fix. `stageKeyHandoff`
-  and `consumeKeyHandoff` pass the key once, under a separate session key, with a
-  two-minute expiry; it is deleted on first read, refused when stale, and cleared
-  by `lock()`. That keeps what auto-lock *every open* actually promises — the key
-  does not outlive the popup that used it — while letting a biometric prompt in
-  another window count as the authentication event for exactly one popup.
-
-Implementation: [`src/utils/passkey.ts`](src/utils/passkey.ts) (ceremonies only,
-holds no key material) and the passkey functions in
-[`src/utils/vault.ts`](src/utils/vault.ts).
-
-## Credential Exchange Format
-
-CXF is the FIDO Alliance's JSON interchange format for credentials. It covers
-TOTP secrets as well as passkeys, which makes it the first format this extension
-can both write and read that other vendors also speak.
-
-- **Export**: a third option next to the plain and password-protected files.
-- **Import**: recognised automatically, so there is no format to choose.
-- **The secret** is written as plain RFC 4648 Base32, byte for byte as stored. A
-  test asserts the exact string, because a re-encoding bug here produces
-  confidently wrong codes rather than a visible failure.
-- **Every credential of every item** is examined on import. Password managers
-  put a TOTP credential in the same login item as the password; walking only the
-  first would drop the 2FA half of the file.
-- **One bad row never costs the file.** Unreadable entries are counted and
-  reported; the rest import.
-
-CXP, the protocol half of the standard, is deliberately not implemented: it
-negotiates provider-to-provider transfer through the operating system, which an
-extension cannot do. Implementation: [`src/utils/cxf.ts`](src/utils/cxf.ts).
-
-## Sharing codes by link
-
-A link that shows another person a live code for one account, for a limited
-time, in any browser and with nothing to install. Implementation:
-[`src/utils/share.ts`](src/utils/share.ts); the page that opens it lives in the
-site repository at `authenticator.sh/s`.
-
-- **The secret never leaves the device.** TOTP is deterministic, so the codes
-  for the next hour can be computed now and handed over on their own. The link
-  holds that run — one code per period — and nothing that could produce a code
-  after it. The time limit is not a rule the page enforces; it is the absence
-  of any further codes.
-- **An hour is the maximum**, and the page refuses longer runs. An hour of
-  six-digit codes is about 550 characters: readable as a QR code from a screen,
-  which is the one way to pass a link that leaves no copy in a messenger's
-  cloud, and short enough for email clients that wrap at 998 characters.
-- **There is no server.** The whole payload travels in the URL fragment, which
-  browsers never send to a host. Nothing is uploaded when a link is made and
-  nothing is stored when it is opened, so there is no database of shared codes
-  to breach and no revocation that would be theatre.
-- **Optional password.** Without one, the sixteen random bytes in the link are
-  the key (HKDF-SHA256). With one, the key is PBKDF2 of the password salted
-  with those bytes — the same stretching as the vault — so the link alone and
-  the password alone are each useless. The two-byte header that says "ask for a
-  password" is authenticated with the body, so it cannot be flipped in transit.
-- **The two sides share a fixture, not code.** The extension seals links and
-  the site opens them; `test/fixtures/share-vectors.json` pins the exact bytes
-  for six cases and both repositories assert against it.
-
-## Building from Source
-
-### Prerequisites
-
-- Node.js 20.x LTS
-- npm 10.x
-
-### Build
+빌드된 결과물을 배포하지 않는다. 직접 빌드해서 압축 해제된 확장으로 로드한다.
 
 ```bash
+git clone https://github.com/krPlatypus/2fa.git
+cd 2fa
 npm ci
 npm run build
 ```
 
-The resulting `dist/` directory is the unpacked extension.
+`chrome://extensions` → 개발자 모드 켜기 → **압축해제된 확장 프로그램을 로드** →
+방금 만들어진 `dist/` 선택.
 
-### Load in Chrome (development)
-
-1. Open `chrome://extensions/`
-2. Enable **Developer mode**
-3. Click **Load unpacked** and select the `dist/` directory
-
-### Development
+검증까지 하려면:
 
 ```bash
-npm run dev
+npm run typecheck
+npx tsx test/run.ts
 ```
 
-### Tests
+> **Node 20을 쓸 것.** Node 24부터 `navigator`가 읽기 전용 전역이라
+> `test/fake-dom.ts`가 죽고 `quick fill in the page` 스위트만 실패한다.
+> 나머지 22개 스위트는 어느 쪽에서든 통과한다.
 
-```bash
-npm test
-```
+### 폰트
 
-End-to-end scenarios for the storage and vault paths — enabling, locking,
-password change, recovery-code reset, encrypted export, disabling — run against
-real WebCrypto with `chrome.storage` and IndexedDB mocked. These cover the code
-where a bug means permanent loss of a user's 2FA seeds, so they run the real
-modules rather than stubs.
+영문·키릴은 **Ubuntu**를 번들한다. 별도 설치가 필요 없다. Google Fonts 빌드의
+`latin`·`latin-ext`·`cyrillic` 서브셋을 400/500/700 굵기로, 9개 파일 118KB이고
+`unicode-range`가 붙어 있어 브라우저가 필요한 것만 받는다. 한국어 UI라면 실제로
+로드되는 건 `latin` 3개, 42KB다.
 
-The passkey suite covers the wrapper rather than the WebAuthn ceremony, which
-cannot run under Node: a stand-in PRF output proves that adding a passkey never
-removes the password or recovery wrapper, that a password change and a
-recovery-code reset both leave it working, and that neither the master key nor
-the PRF output is ever written to metadata.
+한글은 **티머니 둥근바람**을 쓰는데 **번들하지 않는다.** 설치돼 있으면 쓰고, 없으면
+원래 쓰던 플랫폼 폰트(SF, Segoe 등)로 떨어진다. 확장은 그대로 동작한다.
 
-## Verifying the Chrome Web Store Build
+<details>
+<summary>왜 번들하지 않는가</summary>
 
-To verify that the version published on the Chrome Web Store was built from this source code:
+이 서체의 라이선스는 어떤 용도로든 무료지만 **수정한 사본의 재배포를 금지한다.**
+2,350자 상용 서브셋도, WOFF2 변환도 둘 다 수정에 해당한다. 어느 쪽이든 파일을
+1MB 아래로 내렸을 텐데, 그게 막히니 원본 OTF 3.0MB를 그대로 넣는 것이 유일한
+방법이었다.
 
-1. Download the `.crx` for the published version from the Chrome Web Store
-2. Unzip it to a directory
-3. Check out this repository at the matching git tag (e.g. `v1.13.0`)
-4. Run `npm ci && npm run build` using **Node 20 LTS**
-5. Compare the `dist/` directory contents with the unzipped `.crx`
+한동안 그렇게 했다가 뺐다. 나머지 팝업 전체가 430KB인데 폰트 하나가 3,076KB였다.
+그리고 비용은 바이트가 아니다 — `chrome-extension://` 읽기는 로컬 디스크에서 오고
+전송은 수 ms다. 비용은 Chrome이 첫 프레임 전에 타입페이스로 만들어야 하는
+**글리프 12,259개**다. 브라우저를 켜고 처음 팝업을 열 때 눈에 보였다.
 
-Differences should only exist in:
-- File ordering inside zips
-- Whitespace differences in minified output across Node patch versions
+설치된 폰트를 참조하는 것은 재배포가 아니므로, 파일과 함께 라이선스 문제도 사라졌다.
+</details>
 
-For each release we publish `SHA256SUMS-v<version>.txt` — a SHA-256 for every file in the produced `dist/` — in [GitHub Releases](https://github.com/authenticator-sh/2fa/releases). It is in `sha256sum` format, so you can check your own build against it directly:
+**설치하려면** [티머니 CI 페이지](https://www.tmoney.co.kr/aeb/cmnctn/ci/ci.dev)에서
+`TmoneyRoundWind.zip`을 받아 `02_수동설치파일/01_otf/TmoneyRoundWindRegular.otf`를
+설치한다. 확장 쪽은 고칠 것이 없다. `@font-face`의 `local()` 이름 세 개(PostScript
+이름, 한국어 macOS가 보고하는 패밀리 이름, 윈도우 설치본 이름)가 알아서 찾는다.
 
-```bash
-cd dist && sha256sum -c ../SHA256SUMS-v1.13.0.txt   # shasum -a 256 -c on macOS
-```
+코드 숫자도 이 서체로 그린다. 숫자가 전부 640 units로 **tabular**라서 매초 코드가
+바뀌어도 자릿수가 흔들리지 않는다. 없을 때를 대비해 `font-otp` 스택 뒤에 monospace가
+받쳐 두는데, 그 성질을 유지하려는 것이다.
 
-## Architecture
+자세한 내용과 두 라이선스는 [`public/fonts/NOTICE.md`](public/fonts/NOTICE.md)에 있다.
 
-```
-src/
-├── background/
-│   ├── service-worker.ts    # MV3 service worker: install/uninstall URLs, menu, shortcut
-│   ├── quick-fill.ts        # Right-click flow: pick account, generate, inject
-│   └── quick-fill-page.ts   # The only code that ever runs in a page (injected on demand)
-├── popup/
-│   ├── App.tsx              # Main UI
-│   └── index.tsx
-├── scan/
-│   └── App.tsx              # Camera QR scanner (own tab — see the file header)
-├── passkey/
-│   └── App.tsx              # Passkey ceremony (own tab — the popup dies on focus loss)
-├── components/              # React components
-├── hooks/
-│   ├── useAccounts.ts       # Account state + auto-backup
-│   ├── useVault.ts          # Lock/unlock state
-│   └── useTOTP.ts           # TOTP refresh loop
-├── utils/
-│   ├── crypto.ts            # WebCrypto primitives (PBKDF2, AES-GCM, HKDF)
-│   ├── vault.ts             # Vault lifecycle: unlock, auto-lock, recovery, passkey
-│   ├── passkey.ts           # WebAuthn PRF ceremonies (no key material)
-│   ├── storage.ts           # Local-primary storage, encryption layer, retry
-│   ├── backup-file.ts       # Plain and password-protected export formats
-│   ├── cxf.ts               # Credential Exchange Format read/write
-│   ├── auto-backup.ts       # IndexedDB backup rotation (7 latest)
-│   ├── vault-prompt.ts      # When to offer password protection
-│   ├── time-sync.ts         # Optional clock-drift check
-│   ├── totp.ts              # TOTP via OTPAuth
-│   ├── qr-parser.ts         # QR decoding
-│   ├── migration-parser.ts  # Google Authenticator export parser
-│   ├── suggestions.ts       # Which account belongs to the site you are on
-│   └── screen-capture.ts    # captureVisibleTab wrapper (activeTab only)
-└── types/
-```
+---
 
-## Network Access
+## 변경 이력
 
-The extension sends **nothing about you anywhere**. The only automatic request is the cached clock check below; everything else happens because you clicked something. In full, the outbound HTTPS calls are:
+기준: upstream `authenticator-sh/2fa` @ `493f69c` (v1.13.0, 2026-09-07)
 
-| URL                                         | When                          | Purpose                        |
-|---------------------------------------------|-------------------------------|--------------------------------|
-| `https://www.authenticator.sh/welcome`      | First install                 | Opens welcome page in a new tab |
-| `https://www.authenticator.sh/uninstall`    | After uninstall (Chrome API)  | Opens feedback page            |
-| `https://chromewebstore.google.com/.../reviews` | User takes the rating prompt | Opens the Web Store review form |
-| `https://www.authenticator.sh/support`      | User clicks "Help & support"  | Opens the support page         |
-| `https://www.authenticator.sh/faq` (or `/<lang>/faq`) | User clicks the help icon, or "How do I fix this?" on the clock warning | Opens the answers, in the popup's language |
-| `https://authenticator.featurebase.app`     | User clicks "Request a feature" | Opens the public feature board |
-| `https://chromewebstore.google.com/detail/password-manager/...` | User clicks the cross-promo banner | Opens our other extension's listing |
-| `https://time.akamai.com/?iso`              | Popup open (optional, cached) | Clock drift detection for TOTP |
-| `https://timeapi.io/api/time/current/zone?timeZone=UTC` | Popup open (optional, cached) | Clock drift detection for TOTP |
-| `https://cloudflare.com/cdn-cgi/trace`      | Popup open (optional, cached) | Clock drift detection for TOTP |
+### 2026-09-11 — 목록과 상호작용
 
-Camera scanning uses `getUserMedia` on an extension page opened in a tab. That
-needs no manifest permission — it goes through the browser's standard camera
-prompt, granted per extension origin and revocable in site settings. It is
-never requested until the user opens the scanner.
+**추가**
 
-The clock-drift requests are unauthenticated GETs that carry no user data and
-are cached. Any two of the three agreeing is enough, so one host going offline
-does not disable the check — and when none of them can be reached, Settings
-says so rather than reporting a clock it never measured. No fonts, scripts, or styles are loaded from remote
-hosts — everything needed to render the popup is bundled.
+- **표시 이름**(`Account.label`). 목록 제목을 따로 지을 수 있다. 라벨이 있으면
+  제목은 그것뿐이고, 없으면 예전 `발급자: 이름` 규칙 그대로다. 순수 표시 전용이라
+  **매칭 코드는 한 줄도 읽지 않는다** — 발급자와 이름은 사이트 추천·quick fill
+  매칭·브랜드 로고 조회·otpauth 내보내기를 계속 담당한다. 검색은 세 필드를 다 본다.
+- **부제목.** 라벨이 있을 때만 제목 밑에 작은 회색으로 `계정명 | 서비스`를 적는다.
+  라벨이 가린 두 필드를 되돌려주는 줄이다.
+- **행 우클릭 메뉴.** 편집 → 공유 → 구분선 → 삭제(빨강).
+- **복사 실패 알림.** 클립보드 쓰기가 거부되면 토스트로 말한다. 이전에는 콘솔에만
+  적히고 화면은 아무 말도 하지 않아서, 잘못 누른 것과 구별되지 않았다.
 
-## Where your data lives
+**변경**
 
-| Store | Contents | Default |
-|-------|----------|---------|
-| `chrome.storage.local` | Accounts (encrypted when password protection is on), settings, and — only while password protection is off — the per-site usage history | Always used; primary |
-| `chrome.storage.session` | The unlocked master key, the selected group filter and the per-site usage history — memory only, cleared when the browser closes | Only while unlocked |
-| `chrome.storage.sync` | A copy of the accounts and the vault metadata, replicated by Chrome **through the user's own Google account** | On, switchable off |
-| IndexedDB | Seven rolling snapshots, in the same form as the primary store | Always used |
+- **행 전체가 복사 영역이 됐다.** 코드와 그 옆 작은 클립보드 아이콘이 타깃이었는데,
+  좁은 창에서 행의 3분의 1쯤 되는 띠였고 이름이 적힌 나머지는 아무 일도 하지 않았다.
+  리플은 눌린 것에서 크기를 재니 따라온다. `div` + `role="button"` + `tabIndex`로
+  키보드 접근을 유지했다.
+- **복사 확인이 아이콘에서 행으로.** 초록 물결이 행을 한 번 지나가고, 그동안 코드
+  숫자가 초록이고, 링 안에서 초와 체크가 교차한다. 색만으로는 모두에게 말이 되지
+  않으므로 체크가 같은 말을 모양으로 한다.
+- **긴 이름이 제자리에서 펼쳐진다.** 떠 있는 카드가 아니라 같은 자리·같은 활자로
+  글자가 잘린 데서부터 이어지고, 포인터가 떠나면 되감긴다.
 
-Two consequences worth stating plainly:
+**삭제**
 
-- **With password protection off, accounts sit in sync in the clear**, which
-  means Chrome replicates them to Google. That is the user's own Google account
-  and we never see them, but it is not "on the device only". Turning password
-  protection on encrypts them before they are ever handed to sync; turning sync
-  off in Settings stops the replication and removes what is already there.
-- **The per-site usage history is not covered by the vault** while it is being
-  collected. Enabling password protection deletes it, and it can be switched off
-  independently.
+- **행의 공유·편집·삭제 버튼 셋과 드래그 핸들.** 320px 팝업에서 컨트롤 네 개는
+  가끔 하는 일 때문에 계정 이름이 필요로 하는 폭을 상시로 내주는 것이었다. 행은
+  원래부터 통째로 draggable이었고 핸들은 그걸 말해주기만 했다.
 
-We operate no servers and receive no user data on any path.
+### 2026-09-11 — 성능과 버그
 
-## Security
+**고침**
 
-See [SECURITY.md](SECURITY.md) for the responsible disclosure policy.
+- **팝업이 뜨기 전 기다리던 `chrome.storage.sync` 읽기 세 번 제거.** sync는 디스크
+  읽기가 아니라 Chrome 동기화 서비스를 거친다. `getVaultMeta()`가 계정을 디코드할
+  때마다·인코드할 때마다·`isVaultEnabled()`마다 불리면서 매번 sync를 읽고 있었다.
+  이제 로컬만 읽고, sync 대조는 `reconcileVaultMeta()`로 나가 **창이 뜬 뒤**와
+  **키를 푸는 모든 함수 맨 위**에서 돈다. 계정 목록은 로컬로 먼저 그리고 병합은
+  뒤따라 반영한다(병합은 union이라 목록이 자라기만 한다). 동기화를 꺼도 읽기는
+  돌고 있던 것도 막았다.
+- **서비스 워커의 번역.** 워커는 최초 평가 이후 동적 `import()`가 금지라 로케일
+  청크 로드가 거부되고, Vite preload 헬퍼의 에러 처리기가 `window.dispatchEvent`에서
+  던지며 진짜 원인을 가리고 있었다. 결과적으로 **우클릭 메뉴가 20개 언어 전부
+  영어**였다. 팝업이 필요한 문자열 네 개를 storage에 적고 워커가 읽는 방식으로 바꿔
+  워커 번들을 9.5KB로 유지했다.
+- **빈 저장소를 모듈 상수로 돌려주던 버그.** 아이콘 저장소가 그랬는데, 갱신 함수가
+  넘겨받은 객체를 그대로 변형해서 처음 설정한 아이콘이 그 상수에 박혔다. 이후
+  "아무것도 없다"는 모든 응답이 그걸 들고 왔고, **잠긴 금고가 방금 봉인한 아이콘을
+  그대로 내주고 있었다.**
+- **`createT(lang)`가 로드되지 않은 테이블을 조용히 영어로 돌려주던 문제.**
 
-Report security issues to **security@authenticator.sh** — please do **not** open a public issue for security bugs.
+### 2026-09-10~11 — 아이콘
 
-## Contributing
+**추가**
 
-Bug reports and pull requests are welcome. Please read [CONTRIBUTING.md](.github/CONTRIBUTING.md) before submitting, and the [Code of Conduct](.github/CODE_OF_CONDUCT.md) for how we expect people to treat each other here.
+- **브랜드 로고 45개.** simple-icons의 단일 path SVG를 소스에 인라인했다. 파비콘을
+  받아오지 않는 이유는 원본 주석 그대로다 — 서비스마다 요청 1건이면 이 사용자가
+  어떤 사이트의 2FA를 갖고 있는지 응답하는 쪽에 알려주는 셈이다. issuer를 영숫자로
+  정규화해 정확 일치 → 최장 접두사(4자 이상) 순으로 맞춘다.
+  Microsoft·Amazon·LinkedIn·Slack 등은 **simple-icons가 상표권 이의로 저장소에서
+  제거**해 CC0 마크가 존재하지 않는다. 그 계정들은 첫 글자를 유지한다.
+- **계정 아이콘 업로드.** 편집 화면에서 이미지를 고르면 canvas로 32×32 PNG로 다시
+  그려 저장한다. 크기가 고정되고, **SVG가 스토리지나 DOM에 SVG로 도달하는 경로가
+  사라진다** — 래스터화가 곧 소독이다.
+- **그룹 아이콘과 색.** lucide 24개를 이름으로 직접 import한 고정 목록에서 고른다.
+  네임스페이스 import 후 런타임 인덱싱은 4,226개를 전부 번들에 넣기 때문이다. 색은
+  고르지 않으면 그룹 이름에서 유도해, 그룹이 생기는 순간부터 색이 있다. 칩의 아이콘은
+  뱃지로 감쌌다 — 12px 아이콘을 자기 색의 옅은 틴트 위에 그냥 놓으면 사라진다.
+- **백업에 아이콘 포함.** 평문 JSON과 암호화 파일 둘 다. 암호화 파일의 봉인 내용물이
+  계정 배열에서 `{accounts, icons}`로 바뀌었고, 읽는 쪽은 **양쪽 다** 받는다.
+  CXF와 URI 목록에는 넣지 않는다 — 남의 포맷이다. 들어오는 값은 파일에서 온 것이라
+  데이터 URL 형식·용량·색 형식을 전부 검증한다.
 
-## Docs
+**변경**
 
-- [Installing from source](docs/install.md)
-- [Release notes](docs/release-notes/) — what changed in each version
-- [Release checklist](docs/releasing.md) and [review checklist](docs/review-checklist.md)
+- 계정 아이콘이 20px에서 **32px**로, 이름 옆 인라인에서 **왼쪽 열**로. 32는 임의의
+  숫자가 아니라 업로드한 그림이 저장되는 크기다 — 1픽셀이 1픽셀로 그려진다. 링도
+  코드 줄에서 꺼내 두 줄 전체에 대해 세로 가운데로 옮겼다.
+- 아이콘 설정이 기본 **켜짐**으로. 글자 하나만 그릴 수 있었을 때는 꺼두는 게 맞았다.
 
-## Technology
+<details>
+<summary>아이콘을 계정 레코드가 아니라 별도 저장소에 둔 이유</summary>
 
-- React 18, TypeScript, Tailwind CSS
-- Vite (build)
-- [OTPAuth](https://github.com/hectorm/otpauth) (TOTP/HOTP)
-- [jsQR](https://github.com/cozmo/jsQR) (QR decoding, lazy-loaded)
-- Lucide React (icons)
+계정 레코드는 `chrome.storage.sync`로 가는데 키당 8KB, 전체 약 100KB이고 계정이
+이미 그중 84KB까지 쓴다. 데이터 URL로 1~2KB인 PNG 스물몇 개면 남은 예산을 다 먹고
+동기화가 멈춘다. 그림 때문에. 밖에 두면 이 프로젝트에서 가장 하중이 큰 계정 병합
+코드가 절대 떨어뜨리면 안 되는 필드를 새로 배울 필요도 없다.
 
-## License
+대가는 아이콘이 한 브라우저에만 남는다는 것이고, 그래서 백업 파일이 싣는다.
 
-[MIT](LICENSE)
+금고를 켜면 마스터키로 **봉인한다.** 금고의 약속은 프로필을 털려도 어떤 서비스를
+쓰는지 말하지 않는 것이고, 평문으로 놓인 Google 로고는 그걸 그대로 말한다. 사용
+기록과 활성 그룹 필터는 같은 이유로 지워지지만 여기서 지우는 건 틀렸다 — 그림은
+사용자가 한 작업이다.
+</details>
+
+### 2026-09-10 — 보안
+
+**변경**
+
+- **quick fill이 한 번도 쓰지 않은 도메인에는 코드를 채우지 않는다.** 계정과 사이트를
+  부분 문자열로 맞추기 때문에 `github`은 `github.com` 안에도 `github-login.com` 안에도
+  똑같이 있다. 유사 도메인에서도 이름 매칭이 걸려 코드가 그대로 폼에 들어갔고, 그동안
+  사용자에게 보여준 것은 아무것도 없었다. 이제 어딘가에서 쓰인 적 있는 계정은 다른
+  도메인에서 채우지 않고 물어본다.
+  **피싱 방어가 아니다.** TOTP에는 묶어둘 오리진이 없다 — 없애는 것은 조용히 들어가는
+  경로 하나다.
+- **quick fill이 물어보는 사이트를 목록 위에 적는다.** 그 중단이 값어치를 가지려면
+  팝업이 어느 사이트인지 말해줘야 한다. 호스트명은 매칭이 도는 base domain이 아니라
+  브라우저가 정규화한 전체를 적는다 — 유니코드 유사 도메인은 URL이 punycode로
+  돌려주는데 그 형태야말로 보여줄 가치가 있다. 사이드 패널이 덤으로 가장 크게
+  이득인데, `tabs` 권한 없이는 활성 탭을 못 읽어 사이트명을 표시할 방법이 아예
+  없던 유일한 화면이다.
+
+### 2026-09-10 — 디자인
+
+**변경**
+
+- **서체.** 영문 Ubuntu, 한글 티머니 둥근바람. 원격에서 불러오지 않는다 — 팝업이
+  화면을 그리는 것만으로 네트워크 요청을 해서는 안 되고, 그게 이 확장이 기대고 있는
+  주장이다.
+- **코드 가운데 간격.** 여섯 자리를 공백 문자로 이어붙였는데 공백 폭은 서체가 정하고
+  거기에 `tracking-wide`가 또 얹혀, 하나의 코드가 아니라 세 자리 숫자 둘로 읽혔다.
+  0.16em 마진으로 바꿨다. 덤으로 숫자 사이에서 bidi 중립 문자가 사라져 RTL에서
+  `123 456`이 뒤집히던 경로도 막혔다.
+- **5초가 아니라 15초부터 경고.** amber → red 두 단계이고 pulse는 red에만 남겼다.
+  임계값이 카드와 링에 각각 박혀 있어 한쪽은 `isExpiringSoon`, 다른 쪽은 `isLowTime`이
+  됐던 것을 `codeUrgency` 하나로 합쳤다. 고정값이 아니라 period에 맞춰 자른다 —
+  15초 계정이 모든 주기를 amber로 시작하면 경고가 곧 평상시다.
+- **링이 1초 단위로 끊기지 않고 계속 흐른다.** `remaining`으로 그리고 1초 transition을
+  덮고 있어서 링이 안쪽 숫자보다 항상 1초 뒤처졌고, 주기 경계에서 **거꾸로 감겼다.**
+  이제 보정된 시계에서 위상을 뽑아 음수 `animation-delay`로 CSS 애니메이션에 넘긴다.
+  링 뒤에 초당 작업도 프레임당 작업도 없다.
+- **검색 입력란이 선 하나로.** 회색 테두리 안의 회색 배경 위에 포커스 링까지, 테두리가
+  없는 목록 위에서 경계를 설명하는 요소가 셋이었다. 포커스에서 앞쪽 끝부터 그려지고
+  블러에서 온 길로 되감기는데, 양방향이 `scaleX` transition 하나다.
+- **코드를 누르면 클립보드보다 먼저 반응한다.** 포인터가 닿은 자리에서 리플이 퍼진다.
+  이 과정에서 `animate-in fade-in slide-in-from-left-1`이 **작성 이후 한 번도 돌지
+  않았다**는 걸 발견했다 — tailwindcss-animate 클래스인데 그 플러그인이 설정에 없다.
+
+**삭제**
+
+- **`framer-motion`.** src 어느 파일도 참조하지 않았다. rollup이 이미 털어내고
+  있었으니 패키지에는 비용이 없었고, `npm ci`가 받아오는 패키지 4개와 따라가야 할
+  버전 하나가 전부였다.
+
+---
+
+## 라이선스
+
+MIT. 원본 [authenticator-sh/2fa](https://github.com/authenticator-sh/2fa)를 따른다.
+
+번들된 Ubuntu는 Ubuntu Font Licence 1.0 ([`public/fonts/ubuntu/UFL.txt`](public/fonts/ubuntu/UFL.txt)).
+브랜드 마크는 [simple-icons](https://github.com/simple-icons/simple-icons) (CC0-1.0)에서 가져왔고,
+상표는 각 소유자의 것이다. 티머니 둥근바람은 번들하지 않는다.
