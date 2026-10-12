@@ -1,6 +1,6 @@
 import * as OTPAuth from 'otpauth';
 import type { Account, TOTPCode } from '@/types';
-import { ageOf } from './clock';
+import { ageOf, steadyAgeOf, steadyStamp, type SteadyStamp } from './clock';
 
 const OFFSET_STORAGE_KEY = 'timeOffsetMs';
 
@@ -18,9 +18,40 @@ interface StoredOffset {
   at: number; // Date.now() at the moment of the measurement
 }
 
-// Beyond this, a correction has to be re-earned by a fresh measurement. Long
-// enough to survive a weekend offline, short enough that a fixed clock heals.
-const OFFSET_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+/**
+ * How long one measurement keeps a correction alive.
+ *
+ * This was 48 hours, "long enough to survive a weekend offline". What it
+ * actually survived was the fix: a clock five minutes slow, measured once, then
+ * corrected by the OS — and every code for the next two days came out five
+ * minutes ahead. Nothing could clear it offline, and quick fill, which never
+ * measures, filled those codes into sign-in forms.
+ *
+ * A stale correction is not a smaller error than none; it is the same size
+ * error pointed the other way. So a correction lives exactly as long as the
+ * measurement that justified it — the same five minutes after which an
+ * "off" reading is re-checked anyway (CACHE_TTL_OFF_MS in time-sync.ts). The
+ * cost falls on the one case that loses: a drifting clock AND no network.
+ * Codes are for signing in to something over that network, so it is rarely
+ * absent when one is needed.
+ */
+export const OFFSET_MAX_AGE_MS = 5 * 60 * 1000;
+
+/**
+ * A page that stays open — the side panel, the floating window — asks for a
+ * new measurement this long into a correction's life, so a healthy one is
+ * renewed before it lapses instead of codes flickering to the uncorrected
+ * value and back. The minute of slack is twenty times the fetch timeout.
+ */
+const OFFSET_REFRESH_AFTER_MS = 4 * 60 * 1000;
+
+/**
+ * Wall and monotonic clocks disagreeing by more than this since a measurement
+ * means the wall clock was stepped, and whatever we measured against it is
+ * gone. Matches the deadzone below which time-sync.ts does not correct at all:
+ * a smaller jump would not have earned a correction either.
+ */
+const CLOCK_JUMP_TOLERANCE_MS = 3_000;
 
 const DEFAULT_PERIOD = 30;
 const DEFAULT_DIGITS = 6;
@@ -34,12 +65,64 @@ const BASE32 = /^[A-Z2-7]+=*$/;
 // When we're not sure, it stays 0 — meaning "trust the local clock", which is
 // the safe default and matches the historical behavior.
 let timeOffsetMs = 0;
+// When the measurement behind timeOffsetMs was taken, on both clocks.
+let offsetMeasured: SteadyStamp | null = null;
 
-export function setTimeOffsetMs(ms: number): void {
-  timeOffsetMs = Number.isFinite(ms) ? ms : 0;
+let refreshOffset: (() => Promise<unknown>) | null = null;
+let refreshing = false;
+
+/**
+ * Who to ask for a new measurement when a correction is about to lapse.
+ * time-sync.ts registers itself; this module cannot import it, since it
+ * imports us.
+ */
+export function setTimeOffsetRefresher(refresh: (() => Promise<unknown>) | null): void {
+  refreshOffset = refresh;
 }
 
+function requestRefresh(): void {
+  if (!refreshOffset || refreshing) return;
+  refreshing = true;
+  refreshOffset()
+    .catch(() => {})
+    .finally(() => {
+      refreshing = false;
+    });
+}
+
+/**
+ * Apply a correction. `measuredAgoMs` is how old the measurement behind it
+ * already is — a cached reading is not a new one, and restamping it as new
+ * would let one measurement keep itself alive forever.
+ */
+export function setTimeOffsetMs(ms: number, measuredAgoMs = 0): void {
+  timeOffsetMs = Number.isFinite(ms) ? ms : 0;
+  offsetMeasured = timeOffsetMs === 0 ? null : steadyStamp(Math.max(0, measuredAgoMs));
+}
+
+/**
+ * The correction to apply right now — 0 unless a measurement recent enough to
+ * still be true says otherwise.
+ *
+ * Checked on every read rather than once at load, because the popup reads this
+ * every second for as long as it is open, and the side panel is open for days:
+ * an offset that was only ever checked on the way in stayed applied in a
+ * long-lived page long after the clock under it had been fixed.
+ */
 export function getTimeOffsetMs(): number {
+  if (timeOffsetMs === 0 || !offsetMeasured) return 0;
+
+  const age = steadyAgeOf(offsetMeasured, CLOCK_JUMP_TOLERANCE_MS);
+  if (age === null || age > OFFSET_MAX_AGE_MS) {
+    // The clock was stepped since we measured it, or the measurement is too old
+    // to vouch for it. Fall back to the local clock and measure again.
+    timeOffsetMs = 0;
+    offsetMeasured = null;
+    requestRefresh();
+    return 0;
+  }
+
+  if (age >= OFFSET_REFRESH_AFTER_MS) requestRefresh();
   return timeOffsetMs;
 }
 
@@ -61,14 +144,14 @@ export async function loadTimeOffset(): Promise<void> {
       // invalidates the measurement as surely as an expired one does.
       const age = ageOf(at) ?? Infinity;
       if (age <= OFFSET_MAX_AGE_MS) {
-        timeOffsetMs = ms;
+        setTimeOffsetMs(ms, age);
         return;
       }
     }
 
     // Stale, malformed, or a bare number from an older version: trust the local
     // clock again and drop the record so it cannot be resurrected.
-    timeOffsetMs = 0;
+    setTimeOffsetMs(0);
     if (record !== undefined) {
       await chrome.storage.local.remove(OFFSET_STORAGE_KEY).catch(() => {});
     }
@@ -81,14 +164,14 @@ export async function loadTimeOffset(): Promise<void> {
  * Persist a correction (or 0 to clear one). Owned here rather than by the
  * caller so the record shape and the storage key live in exactly one place.
  */
-export async function persistTimeOffset(ms: number): Promise<void> {
+export async function persistTimeOffset(ms: number, measuredAt: number = Date.now()): Promise<void> {
   try {
     if (ms === 0) {
       await chrome.storage.local.remove(OFFSET_STORAGE_KEY);
       return;
     }
     await chrome.storage.local.set({
-      [OFFSET_STORAGE_KEY]: { ms, at: Date.now() } satisfies StoredOffset,
+      [OFFSET_STORAGE_KEY]: { ms, at: measuredAt } satisfies StoredOffset,
     });
   } catch {
     // best-effort — the in-memory correction still applies for this session
@@ -160,7 +243,11 @@ export function isUsableSecret(secret: unknown): boolean {
   // secret still produces a plausible code from one byte of key. Anything that
   // short is already broken — the point here is only that a record which cannot
   // carry a key at all fails visibly instead of generating digits.
-  return cleaned.length >= 2 && BASE32.test(cleaned);
+  //
+  // Measured without the padding. `A=======` is eight characters long and
+  // carries no key at all; counting the `=` let it through to exactly the
+  // empty-key HMAC this floor exists to stop.
+  return cleaned.replace(/=+$/, '').length >= 2 && BASE32.test(cleaned);
 }
 
 export function validateSecret(secret: string): boolean {
@@ -272,7 +359,7 @@ export function generateTOTP(account: Account): TOTPCode {
   const totp = buildTOTP(account);
   const { period } = totpParams(account);
 
-  const correctedMs = Date.now() + timeOffsetMs;
+  const correctedMs = Date.now() + getTimeOffsetMs();
   const code = totp.generate({ timestamp: correctedMs });
   const nowSec = Math.floor(correctedMs / 1000);
   const remaining = period - (nowSec % period);
@@ -283,6 +370,9 @@ export function generateTOTP(account: Account): TOTPCode {
     period,
   };
 }
+
+/** Accounts whose failure has already been logged; see tryGenerateTOTP. */
+const reportedBroken = new Set<string>();
 
 /**
  * Generation that cannot take the popup down.
@@ -296,7 +386,12 @@ export function tryGenerateTOTP(account: Account): TOTPCode | null {
   try {
     return generateTOTP(account);
   } catch (error) {
-    console.error('Could not generate a code for account', account.id, error);
+    // Once per account, not once per tick: a broken row re-renders every
+    // second in every open window, and the console was nothing but this.
+    if (!reportedBroken.has(account.id)) {
+      reportedBroken.add(account.id);
+      console.error('Could not generate a code for account', account.id, error);
+    }
     return null;
   }
 }

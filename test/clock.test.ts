@@ -51,6 +51,22 @@ export async function run(): Promise<void> {
     check('and neither does one beyond its own window', !clock.deadlinePending(now + 400 * DAY, 7 * DAY));
   }
 
+  // The fix that `ageOf` cannot see: a slow clock stepped FORWARDS by the OS.
+  // The stamp just looks a minute older, well inside any limit, and whatever
+  // was measured against the old clock goes on being believed.
+  scenario('A clock stepped forwards is caught by the one that did not step');
+  {
+    const stamp = await at(Date.now(), async () => clock.steadyStamp());
+    const steady = await at(stamp.wall + 50, async () => clock.steadyAgeOf(stamp, 3_000));
+    check('an undisturbed stamp has an age', steady !== null && steady >= 0 && steady < 3_000, String(steady));
+    const stepped = await at(stamp.wall + MINUTE, async () => clock.steadyAgeOf(stamp, 3_000));
+    check('a minute stepped forwards is not an age', stepped === null, String(stepped));
+    const back = await at(stamp.wall - MINUTE, async () => clock.steadyAgeOf(stamp, 3_000));
+    check('and neither is a minute stepped back', back === null, String(back));
+    const restored = clock.steadyStamp(2 * MINUTE);
+    check('a stamp rebuilt from a stored age keeps that age', Math.abs((clock.steadyAgeOf(restored, 3_000) ?? -1) - 2 * MINUTE) < 1_000);
+  }
+
   // The vault's idle deadline is the only thing enforcing auto-lock: there is
   // no alarm and no timer, just this subtraction on every key read.
   scenario('Winding the clock back does not disable auto-lock');

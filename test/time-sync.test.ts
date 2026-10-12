@@ -87,6 +87,19 @@ export async function run(): Promise<void> {
     totp.setTimeOffsetMs(0);
   };
 
+  /**
+   * The correction code generation would apply at device time `deviceMs`.
+   *
+   * Read under the pinned clock, never the real one: a correction checks its
+   * own age on every read now, and the real clock is weeks away from these
+   * fixtures — read there, every correction would look long expired.
+   */
+  const offsetAt = (deviceMs: number) => at(deviceMs, async () => totp.getTimeOffsetMs());
+
+  /** Let a renewal that a read set off run to the end, under the same clock. */
+  const settle = (deviceMs: number) =>
+    at(deviceMs, () => new Promise<void>((resolve) => setTimeout(resolve, 30)));
+
   scenario('Agreeing sources on a skewed clock warn and correct');
   await fresh();
   {
@@ -95,7 +108,8 @@ export async function run(): Promise<void> {
     stub.restore();
     check('a notice is raised', notice !== null, String(notice));
     check('and it reads as five minutes', Math.abs((notice ?? 0) - 300) <= 2, String(notice));
-    check('code generation is corrected', Math.abs(totp.getTimeOffsetMs() - 300_000) < 2_000, String(totp.getTimeOffsetMs()));
+    const applied = await offsetAt(TRUE_MS - 300_000);
+    check('code generation is corrected', Math.abs(applied - 300_000) < 2_000, String(applied));
   }
 
   // The outage that started all of this: worldtimeapi.org stopped answering,
@@ -108,7 +122,7 @@ export async function run(): Promise<void> {
     stub.restore();
     check('the two survivors still make a verdict', result.confident === true);
     check('the drift is reported', result.synced === false, String(result.offsetSeconds));
-    check('and the correction is applied', Math.abs(totp.getTimeOffsetMs() - 300_000) < 2_000);
+    check('and the correction is applied', Math.abs((await offsetAt(TRUE_MS - 300_000)) - 300_000) < 2_000);
   }
 
   scenario('A lone source is not evidence');
@@ -119,7 +133,7 @@ export async function run(): Promise<void> {
     stub.restore();
     check('not confident', result.confident === false);
     check('no alarm is raised on a guess', result.synced === true);
-    check('and code generation is left alone', totp.getTimeOffsetMs() === 0);
+    check('and code generation is left alone', (await offsetAt(TRUE_MS - 300_000)) === 0);
   }
 
   scenario('An unverifiable reading is retried in minutes, not hours');
@@ -163,13 +177,16 @@ export async function run(): Promise<void> {
   {
     await at(TRUE_MS, () => totp.persistTimeOffset(300_000));
 
+    // It lives as long as the measurement behind it and no longer: this was
+    // 48 hours, which is how a clock the OS had since fixed kept getting
+    // "corrected" by five minutes for two days.
     totp.setTimeOffsetMs(0);
-    await at(TRUE_MS + 60 * 60_000, () => totp.loadTimeOffset());
-    check('an hour later it still applies', totp.getTimeOffsetMs() === 300_000);
+    await at(TRUE_MS + 3 * 60_000, () => totp.loadTimeOffset());
+    check('minutes later it still applies', (await offsetAt(TRUE_MS + 3 * 60_000)) === 300_000);
 
     totp.setTimeOffsetMs(0);
-    await at(TRUE_MS + 49 * 60 * 60_000, () => totp.loadTimeOffset());
-    check('two days later it does not', totp.getTimeOffsetMs() === 0);
+    await at(TRUE_MS + 10 * 60_000, () => totp.loadTimeOffset());
+    check('ten minutes later it does not', (await offsetAt(TRUE_MS + 10 * 60_000)) === 0);
     check('and it is off the disk, not just ignored', areas.local.timeOffsetMs === undefined);
   }
 
@@ -181,7 +198,7 @@ export async function run(): Promise<void> {
     // one ever since.
     areas.local.timeOffsetMs = 300_000;
     await at(TRUE_MS, () => totp.loadTimeOffset());
-    check('the undated correction is dropped', totp.getTimeOffsetMs() === 0);
+    check('the undated correction is dropped', (await offsetAt(TRUE_MS)) === 0);
     check('and removed so it cannot come back', areas.local.timeOffsetMs === undefined);
   }
 
@@ -233,10 +250,16 @@ export async function run(): Promise<void> {
 
     // A measurement is already under way when the button is pressed: its answer
     // came from the cache we are about to clear, so it is not an answer.
+    //
+    // Both under one pinned clock: two overlapping `at` calls unpin each other
+    // in the wrong order, and the recheck then finished on the real clock.
     const fresh1 = stubFetch(honest(TRUE_MS));
-    const pending = at(TRUE_MS - 300_000, () => timeSync.getClockStatus());
-    const rechecked = await at(TRUE_MS - 300_000, () => timeSync.recheckClock());
-    await pending;
+    const rechecked = await at(TRUE_MS - 300_000, async () => {
+      const pending = timeSync.getClockStatus();
+      const answer = await timeSync.recheckClock();
+      await pending;
+      return answer;
+    });
     fresh1.restore();
 
     check('the sources were actually asked', fresh1.calls.length > 0, `${fresh1.calls.length} calls`);
@@ -254,5 +277,134 @@ export async function run(): Promise<void> {
     check('the majority is believed', result.confident === true);
     check('a healthy clock stays healthy', result.synced === true, String(result.offsetSeconds));
     check('and nothing is applied to code generation', totp.getTimeOffsetMs() === 0);
+  }
+  // The rest are the correction outliving the clock it was measured against.
+  // The user sees our warning, fixes their clock (or the OS does), and codes
+  // go on being shifted by the drift that is no longer there — the same size
+  // error as before, pointed the other way.
+  const ACCOUNT: any = { id: 'x', name: 'n', issuer: 'i', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 };
+  const SLOW = 300_000; // the device clock, five minutes behind
+
+  scenario('A correction does not outlive the clock being fixed');
+  await fresh();
+  {
+    const measured = stubFetch(honest(TRUE_MS));
+    await at(TRUE_MS - SLOW, () => timeSync.checkTimeSync());
+    measured.restore();
+    check('the drift is corrected while it lasts', Math.abs((await offsetAt(TRUE_MS - SLOW)) - SLOW) < 2_000);
+
+    // A minute later the OS syncs and the device reads true time. Quick fill
+    // and every new popup start from the stored record alone.
+    const fixedAt = TRUE_MS + 60_000;
+    totp.setTimeOffsetMs(0);
+    await at(fixedAt, () => totp.loadTimeOffset());
+    const shown = await at(fixedAt, async () => totp.generateTOTP(ACCOUNT).code);
+    check('the old correction is not applied', (await offsetAt(fixedAt)) === 0, String(await offsetAt(fixedAt)));
+    check('so the code is the one for the real time', shown === totp.generateCodeAt(ACCOUNT, fixedAt), shown);
+
+    // Offline, nothing can re-measure: what Settings says has to be what codes do.
+    const offline = stubFetch({});
+    const status = await at(fixedAt, () => timeSync.getClockStatus());
+    offline.restore();
+    check('offline, the clock reads unknown', status.state === 'unknown', status.state);
+    check('and "corrected" matches what codes use', status.corrected === ((await offsetAt(fixedAt)) !== 0));
+  }
+
+  scenario('A check that fails clears the correction instead of vouching for it');
+  await fresh();
+  {
+    const measured = stubFetch(honest(TRUE_MS));
+    await at(TRUE_MS - SLOW, () => timeSync.checkTimeSync());
+    measured.restore();
+
+    // One minute on, "check now" with the network gone. The old code left the
+    // correction applied and reported { unknown, corrected: false } over it.
+    const offline = stubFetch({});
+    const status = await at(TRUE_MS - SLOW + 60_000, () => timeSync.recheckClock());
+    offline.restore();
+    const left = await offsetAt(TRUE_MS - SLOW + 60_000);
+    check('nothing is applied on a reading we could not take', left === 0, String(left));
+    check('and Settings does not say otherwise', status.state === 'unknown' && status.corrected === (left !== 0));
+    check('and it is off the disk', areas.local.timeOffsetMs === undefined);
+  }
+
+  scenario('A small correction is not revived from a six-hour cache');
+  await fresh();
+  {
+    // 45 seconds fast: "synced" (below the warning), and still corrected. That
+    // combination used to earn the six-hour cache, and every cache hit put the
+    // correction back — long after the clock under it had been fixed.
+    const measured = stubFetch(honest(TRUE_MS));
+    await at(TRUE_MS + 45_000, () => timeSync.checkTimeSync());
+    measured.restore();
+    check('it is corrected at first', Math.abs((await offsetAt(TRUE_MS + 45_000)) + 45_000) < 2_000);
+
+    const hourLater = TRUE_MS + 45_000 + 60 * 60_000;
+    totp.setTimeOffsetMs(0);
+    await at(hourLater, () => totp.loadTimeOffset());
+    const offline = stubFetch({});
+    const status = await at(hourLater, () => timeSync.getClockStatus());
+    offline.restore();
+    const applied = await offsetAt(hourLater);
+    check('an hour later it is not applied', applied === 0, String(applied));
+    check('and the check was actually retried', offline.calls.length > 0, `${offline.calls.length} calls`);
+    check('and nothing claims it is', !status.corrected);
+  }
+
+  scenario('A page left open notices the clock being stepped under it');
+  await fresh();
+  {
+    // Sixty seconds slow: small enough that the OS stepping it forward keeps
+    // the measurement inside every age limit. Only the monotonic clock, which
+    // did not step, can tell that the wall clock moved.
+    const measured = stubFetch(honest(TRUE_MS));
+    await at(TRUE_MS - 60_000, () => timeSync.checkTimeSync());
+    measured.restore();
+    check('the drift is corrected', Math.abs((await offsetAt(TRUE_MS - 60_000)) - 60_000) < 2_000);
+
+    const renewed = stubFetch(honest(TRUE_MS));
+    const afterJump = await offsetAt(TRUE_MS);
+    await settle(TRUE_MS);
+    renewed.restore();
+    check('the step drops the correction at once', afterJump === 0, String(afterJump));
+    check('and sets off a new measurement', renewed.calls.length > 0, `${renewed.calls.length} calls`);
+    check('which finds nothing left to correct', (await offsetAt(TRUE_MS)) === 0);
+  }
+
+  scenario('A page left open renews its correction, and drops it when it cannot');
+  await fresh();
+  {
+    const start = TRUE_MS - SLOW;
+    const measured = stubFetch(honest(TRUE_MS));
+    await at(start, () => timeSync.checkTimeSync());
+    measured.restore();
+
+    // The side panel is open for days. Near the end of a correction's life it
+    // asks for a new measurement, so a healthy one never lapses. The clock is
+    // simply read later here — no jump — while the monotonic clock stands
+    // still, so the renewal is set off by age alone.
+    const nearEnd = 4.5 * 60_000;
+    const renewal = stubFetch(honest(TRUE_MS + nearEnd));
+    const stillApplied = await at(start + nearEnd, async () => {
+      totp.setTimeOffsetMs(SLOW, nearEnd);
+      return totp.getTimeOffsetMs();
+    });
+    await settle(start + nearEnd);
+    renewal.restore();
+    check('it still applies near the end', stillApplied === SLOW, String(stillApplied));
+    check('and a renewal was asked for', renewal.calls.length > 0, `${renewal.calls.length} calls`);
+    check('and written down as new', (areas.local.timeOffsetMs as any)?.at === start + nearEnd);
+
+    // Past its life with nothing to renew it — offline — it goes, rather than
+    // being applied for as long as the page stays open.
+    const offline = stubFetch({});
+    const expired = await at(start + nearEnd, async () => {
+      totp.setTimeOffsetMs(SLOW, 6 * 60_000);
+      return totp.getTimeOffsetMs();
+    });
+    await settle(start + nearEnd);
+    offline.restore();
+    check('a correction past its life is dropped', expired === 0, String(expired));
+    check('and the failed renewal leaves it dropped', (await offsetAt(start + nearEnd)) === 0);
   }
 }

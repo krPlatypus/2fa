@@ -1,4 +1,24 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { getActiveLanguage, getTranslation, type TranslationKey } from '@/utils/i18n';
+
+/**
+ * A translated string, or the English one if translating throws.
+ *
+ * This screen was English-only on the grounds that the translation layer might
+ * be what just failed. That was the wrong trade: the crash screen is the one
+ * place someone who reads no English has to understand "your accounts are still
+ * here", and the layer is a table lookup that has already rendered the whole
+ * popup once. The fallback keeps the original guarantee — if the lookup itself
+ * throws, English still renders.
+ */
+function say(key: TranslationKey, english: string): string {
+  try {
+    const text = getTranslation(getActiveLanguage(), key);
+    return text && text !== key ? text : english;
+  } catch {
+    return english;
+  }
+}
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -61,29 +81,29 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   render() {
     if (this.state.message === null) return this.props.children;
 
-    // Deliberately untranslated: the translation layer is part of what may have
-    // just thrown, and English that renders beats a key that does not.
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-white p-6 text-center dark:bg-dark-900">
         <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-          Something went wrong
+          {say('crash.title', 'Something went wrong')}
         </h1>
         <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-          Your accounts are still saved on this device. Reload to try again, or save a copy
-          of them to a file first.
+          {say(
+            'crash.body',
+            'Your accounts are still saved on this device. Reload to try again, or save a copy of them to a file first.'
+          )}
         </p>
         <div className="flex w-full max-w-[220px] flex-col gap-2">
           <button
             onClick={() => window.location.reload()}
             className="rounded-lg bg-[#4285F4] py-2 text-sm font-medium text-white transition-colors hover:bg-[#3367D6]"
           >
-            Reload
+            {say('crash.reload', 'Reload')}
           </button>
           <button
             onClick={this.handleExport}
             className="rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-500 dark:text-gray-300 dark:hover:bg-dark-700"
           >
-            Save a copy of my accounts
+            {say('crash.saveCopy', 'Save a copy of my accounts')}
           </button>
         </div>
         <p className="max-w-[260px] break-words text-[10px] text-gray-400 dark:text-gray-500">

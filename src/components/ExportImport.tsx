@@ -2,20 +2,27 @@ import { useEffect, useState } from 'react';
 import { ClipboardPaste, Download, Link2, Lock, Share2, Unlock, Upload } from 'lucide-react';
 import {
   exportAccounts,
+  getAccounts,
   importAccounts,
   importAccountList,
   addMultipleAccounts,
   quarantinedCount,
-  type ImportResult,
 } from '@/utils/storage';
+import type { ImportReport } from '@/utils/import-formats';
 import { markBackupDone } from '@/utils/backup-reminder';
 import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { saveErrorMessage } from '@/utils/save-error';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret } from '@/utils/totp';
 import { createT, type Language } from '@/utils/i18n';
 import { getCustomIcons, mergeCustomIcons } from '@/utils/custom-icons';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
-import { describeImport } from '@/utils/import-message';
+import {
+  describeFileImport,
+  describeImport,
+  fileImportKind,
+  importErrorMessage,
+} from '@/utils/import-message';
 import { importURIList, looksLikeURIList } from '@/utils/uri-import';
 import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 import {
@@ -29,7 +36,7 @@ import {
   iconsFromPlainBackup,
   readEncryptedBackupFile,
 } from '@/utils/backup-file';
-import { buildCxfFile, cxfFileName, isCxfFile, readCxfFile } from '@/utils/cxf';
+import { buildCxfFile, cxfFileName, isCxfFile, readCxf } from '@/utils/cxf';
 import type { Account } from '@/types';
 
 interface ExportImportProps {
@@ -42,20 +49,28 @@ interface ExportImportProps {
  * Reads a backup file of any supported shape. Encrypted files are prompted for
  * separately so the caller doesn't need to know the format up front.
  *
+ * Aegis, 2FAS, Bitwarden, FreeOTP+, andOTP, Raivo and Authy-dump JSON are read
+ * by importAccounts, which tells them apart by shape (see import-formats.ts).
+ *
  * Returns null when the user cancelled at the password prompt, otherwise the
- * result — including how many entries were unreadable, which the caller must
- * report rather than round up to "import successful".
+ * result — including how many entries were unreadable or unsupported, which
+ * the caller must report rather than round up to "import successful". Throws
+ * ImportRejectedError for a file that cannot be imported at all; say it with
+ * importErrorMessage.
  */
 export async function importBackupText(
   text: string,
   promptForPassword: () => Promise<string | null> | string | null
-): Promise<ImportResult | null> {
+): Promise<ImportReport | null> {
   // Checked before our own plain format because a CXF document is also just
   // JSON: importAccounts would find no `accounts` array, throw "invalid
   // format", and tell someone migrating from another vendor that their file is
   // broken when it is the one file we most want to accept.
   if (isCxfFile(text)) {
-    return await importAccountList(readCxfFile(text));
+    // With its count of unusable secrets: dropped silently, a file holding
+    // nothing but those came back as an empty list and "Import successful!".
+    const { accounts, unreadable } = readCxf(text);
+    return await importAccountList(accounts, { unreadable });
   }
 
   if (!isEncryptedBackupFile(text)) {
@@ -75,12 +90,45 @@ export async function importBackupText(
   return result;
 }
 
-/** "Restored" plus, if any entry was beyond saving, how many and that they were skipped. */
-export function importResultMessage(result: ImportResult, language: Language): string {
+/**
+ * How many were added, and every other count that is not zero: already here,
+ * unreadable, unsupported. "Import successful!" used to be said whatever the
+ * file held — including for a second import of the same file, which added
+ * nothing.
+ */
+export function importResultMessage(result: ImportReport, language: Language): string {
+  return describeFileImport(result, language);
+}
+
+/** The toast colour for a result: green only when the whole file went in. */
+export function importResultKind(result: ImportReport): 'success' | 'info' {
+  return fileImportKind(result);
+}
+
+/**
+ * What to say when importing a QR image fails.
+ *
+ * Never the error's own text. That used to go straight into the toast, so an
+ * iPhone HEIC photo or a truncated download — which createImageBitmap rejects
+ * with "The source image could not be decoded." — was reported in English to
+ * users of all twenty languages, as a sentence about "the source image" that
+ * does not say what to do.
+ */
+export function qrImportErrorMessage(error: unknown, language: Language): string {
   const t = createT(language);
-  return result.unreadable > 0
-    ? t('import.successUnreadable', result.unreadable)
-    : t('import.success');
+  // Understood, and refused on purpose — saying "invalid QR" here would send
+  // the user off to re-export a code that can never work.
+  if (error instanceof UnsupportedOTPTypeError) return t('addAccount.errorHotp');
+  // What the browser's image decoder throws: a DOMException, named for the
+  // decode failure rather than for anything the user did.
+  const name = error && typeof error === 'object' ? String((error as { name?: unknown }).name ?? '') : '';
+  if (
+    (typeof DOMException !== 'undefined' && error instanceof DOMException) ||
+    ['InvalidStateError', 'EncodingError', 'NotSupportedError'].includes(name)
+  ) {
+    return t('import.imageUnreadable');
+  }
+  return saveErrorMessage(error, t);
 }
 
 export function ExportImport({ onImportComplete, onExportComplete, language }: ExportImportProps) {
@@ -218,7 +266,13 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
   const runURIImport = async (text: string): Promise<void> => {
     const outcome = await importURIList(text, language);
     if (outcome.added !== undefined) {
-      await markBackupDone(0);
+      // The count after the import, as the popup's own file input records it:
+      // with 0 here, thirty days later every account read as added since the
+      // backup and the reminder asked again for accounts nobody had added.
+      // Best-effort: the accounts are already in. A bookkeeping read that fails
+      // here must not skip the refresh and the report, or turn a finished import
+      // into "Failed to import accounts" in the file path below.
+      await getAccounts().then(list => markBackupDone(list.length)).catch(() => {});
       onImportComplete();
     }
     toast(outcome.kind, outcome.message);
@@ -258,19 +312,14 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
           })
         );
         if (imported) {
-          await markBackupDone(0); // Mark as backed up to suppress reminder
+          await getAccounts().then(list => markBackupDone(list.length)).catch(() => {});
           onImportComplete();
-          toast(
-            imported.unreadable > 0 ? 'info' : 'success',
-            importResultMessage(imported, language)
-          );
+          toast(importResultKind(imported), importResultMessage(imported, language));
         }
       }
     } catch (error) {
       console.error('Import failed:', error);
-      toast('error', error instanceof Error && error.name === 'WrongExportPasswordError'
-        ? t('import.wrongPassword')
-        : t('import.failed'));
+      toast('error', importErrorMessage(error, language));
     }
 
     // Reset input value to allow importing the same file again
@@ -279,9 +328,19 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
   const handleQRImport = async (file: File) => {
     try {
-      const result = await decodeQrFromImage(file);
+      let result: string | null;
+      try {
+        result = await decodeQrFromImage(file);
+      } catch (error) {
+        // The image itself could not be opened — HEIC, a truncated file, a
+        // format Chrome does not decode. Not the same as "no QR in it".
+        console.error('QR image could not be decoded:', error);
+        toast('error', t('import.imageUnreadable'));
+        return;
+      }
       if (!result) {
-        throw new Error(t('addAccount.errorNoQr'));
+        toast('error', t('addAccount.errorNoQr'));
+        return;
       }
 
       const parsed = parseQRCode(result);
@@ -300,7 +359,14 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         }));
 
         // Add all accounts at once
-        const importResult = await addMultipleAccounts(accountsToAdd);
+        let importResult;
+        try {
+          importResult = { ...(await addMultipleAccounts(accountsToAdd)), unsupported: parsed.skipped ?? 0 };
+        } catch (error) {
+          console.error('Could not save the scanned accounts:', error);
+          toast('error', saveErrorMessage(error, t));
+          return;
+        }
         onImportComplete();
         const summary = describeImport(importResult, language);
         const more = parsed.batch && parsed.batch.index < parsed.batch.total
@@ -308,18 +374,11 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
           : '';
         toast(importResult.added > 0 ? 'success' : 'info', summary + more);
       } else {
-        throw new Error(t('addAccount.errorInvalidQR'));
+        toast('error', t('addAccount.errorInvalidQR'));
       }
     } catch (error) {
       console.error('QR import failed:', error);
-      if (error instanceof UnsupportedOTPTypeError) {
-        // Understood, and refused on purpose — saying "invalid QR" here would
-        // send the user off to re-export a code that can never work.
-        toast('error', t('addAccount.errorHotp'));
-        return;
-      }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      toast('error', t('import.qrFailed', errorMessage));
+      toast('error', qrImportErrorMessage(error, language));
     }
   };
 

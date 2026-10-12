@@ -150,6 +150,22 @@ export async function run(): Promise<void> {
   doc.focused = true;
   elsewhere.remove();
 
+  // The caret is in a code field inside an iframe. `hasFocus()` is true here
+  // too — it is for every document above the focused one — so the top page used
+  // to answer as well: no field of its own, so the code went to the clipboard
+  // with a "copied" toast on top of the frame that was filling it.
+  scenario('The keyboard shortcut, in the page around the frame being typed in');
+
+  const frame = doc.body.appendChild(new FakeElement());
+  frame.tagName = 'IFRAME';
+  frame.focus();
+  clipboard.text = '';
+  check('the page around it stands aside', (await runDetached({ ...ARGS, requireFocus: true })) === 'skipped');
+  check('and leaves the clipboard alone', clipboard.text === '');
+  check('but the right-click path, which names its frame, still acts', (await runDetached(ARGS)) === 'copied');
+  frame.remove();
+  doc.activeElement = null;
+
   scenario('Which field is chosen');
 
   const search = input({ parent: doc.body, name: 'q', id: 'search' });

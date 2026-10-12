@@ -294,8 +294,12 @@ function textMatches(domain: string, accounts: Account[]): Account[] {
   if (domainCore.length < 3) return [];
 
   return accounts.filter(acc => {
-    const issuer = acc.issuer.toLowerCase();
-    const name = acc.name.toLowerCase();
+    // String(), not a bare .toLowerCase(): a record from an older build or an
+    // outside exporter can hold `issuer: null`, and this runs on every popup
+    // open against the whole list — one such record threw here and took the
+    // suggestion for every other account down with it.
+    const issuer = String(acc.issuer ?? '').toLowerCase();
+    const name = String(acc.name ?? '').toLowerCase();
     return (issuer.length >= 3 && (issuer.includes(domainCore) || domainCore.includes(issuer))) ||
       (name.length >= 3 && name.includes(domainCore));
   });

@@ -125,7 +125,57 @@ function makeArea(store: Store, name: 'local' | 'sync' | 'session') {
 
 const later = (fn: () => void) => setTimeout(fn, 0);
 
+/**
+ * navigator.locks, as every extension context shares it.
+ *
+ * Exclusive, granted in request order, released when the callback settles —
+ * the subset of the Web Locks API storage uses. It lives on globalThis, so the
+ * separate module instances a test loads to stand for separate contexts (a
+ * popup and the scanner tab, say) all contend for the same locks, as they do in
+ * Chrome. Without it every multi-context scenario would be exercising the
+ * in-context fallback instead of the mutex the extension actually runs on.
+ */
+function makeLockManager() {
+  const tails = new Map<string, Promise<void>>();
+  const busy = new Map<string, number>();
+  return {
+    request(name: string, optionsOrCallback: unknown, maybeCallback?: unknown) {
+      const callback = (typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback) as (
+        lock: { name: string; mode: string } | null
+      ) => unknown;
+      const options = (typeof optionsOrCallback === 'object' ? optionsOrCallback : {}) as { ifAvailable?: boolean };
+      // ifAvailable: granted only when nobody holds or waits for the lock;
+      // otherwise the callback runs at once with null, as in Chrome.
+      if (options?.ifAvailable && busy.get(name)) return Promise.resolve().then(() => callback(null));
+      busy.set(name, (busy.get(name) ?? 0) + 1);
+      const previous = tails.get(name) ?? Promise.resolve();
+      let release!: () => void;
+      const held = new Promise<void>(resolve => (release = resolve));
+      tails.set(name, previous.then(() => held));
+      return previous.then(async () => {
+        try {
+          return await callback({ name, mode: 'exclusive' });
+        } finally {
+          busy.set(name, (busy.get(name) ?? 1) - 1);
+          release();
+        }
+      });
+    },
+  };
+}
+
+/** Take navigator.locks away, to exercise the in-context fallback; true puts it back. */
+export function setWebLocks(available: boolean): void {
+  Object.defineProperty(globalThis, 'navigator', {
+    value: available ? { locks: makeLockManager() } : {},
+    configurable: true,
+    writable: true,
+  });
+}
+
 export function installMocks(): void {
+  setWebLocks(true);
+
   (globalThis as any).chrome = {
     storage: {
       local: makeArea(areas.local, 'local'),
@@ -213,6 +263,34 @@ export async function flush(): Promise<void> {
   }
 }
 
+/**
+ * Make chrome.storage take real time: `ms` before every get, set and remove.
+ *
+ * The mocks otherwise resolve as microtasks, so two writers never actually
+ * interleave and every race between contexts passes by accident. Returns the
+ * function that puts the instant versions back.
+ */
+export function withLatency(ms: number): () => void {
+  const originals: Array<() => void> = [];
+  for (const name of ['local', 'sync'] as const) {
+    const area: any = chrome.storage[name];
+    for (const method of ['get', 'set', 'remove']) {
+      const original = area[method];
+      area[method] = async (...args: unknown[]) => {
+        await new Promise(resolve => setTimeout(resolve, ms));
+        return original.apply(area, args);
+      };
+      originals.push(() => { area[method] = original; });
+    }
+  }
+  return () => originals.forEach(undo => undo());
+}
+
+/** A second copy of storage.ts, standing for another extension page. */
+export async function storageContext(tag: string): Promise<typeof import('@/utils/storage')> {
+  return import(new URL(`../src/utils/storage.ts?ctx=${tag}`, import.meta.url).href);
+}
+
 /** Every sync key currently holding accounts, chunked or legacy. */
 export function syncAccountKeys(): string[] {
   return Object.keys(areas.sync).filter(key => key.startsWith('authenticator_accounts'));
@@ -242,6 +320,14 @@ export async function resetState(): Promise<void> {
 
 /** As `resetState`, but leaves the profile looking newly installed. */
 export async function resetStateFreshProfile(): Promise<void> {
+  // A save's sync push is not awaited, and it now queues behind the accounts
+  // lock. Left running, the previous scenario's push lands after the wipe below
+  // and hands this scenario a sync area full of someone else's accounts. The
+  // lock is FIFO, so taking it once waits out everything already queued.
+  const locks = (globalThis as any).navigator?.locks;
+  if (locks) await locks.request('authenticator-accounts', async () => {});
+  await flush();
+
   for (const store of Object.values(areas)) {
     for (const key of Object.keys(store)) delete store[key];
   }

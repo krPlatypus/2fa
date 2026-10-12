@@ -1,5 +1,5 @@
 import { ageOf } from './clock';
-import { getTimeOffsetMs, persistTimeOffset, setTimeOffsetMs } from './totp';
+import { getTimeOffsetMs, persistTimeOffset, setTimeOffsetMs, setTimeOffsetRefresher } from './totp';
 
 export interface TimeSyncResult {
   // synced is true when the clock is fine OR when we simply couldn't measure
@@ -44,21 +44,32 @@ interface TimeSyncCacheEntry {
   cachedAt: number;
 }
 
-async function readCache(): Promise<TimeSyncResult | null> {
+/** The correction a confident measurement calls for: 0 inside the deadzone or past the cap. */
+function correctionFor(result: TimeSyncResult): number {
+  const abs = Math.abs(result.offsetMs);
+  return abs >= CORRECT_DEADZONE_MS && abs <= CORRECT_CAP_MS ? result.offsetMs : 0;
+}
+
+async function readCache(): Promise<{ result: TimeSyncResult; age: number } | null> {
   try {
     const stored = await chrome.storage.local.get(CACHE_KEY);
     const entry: TimeSyncCacheEntry | undefined = stored[CACHE_KEY];
     if (!entry) return null;
-    // Only a confident, healthy reading earns the long TTL. An unmeasurable
-    // one used to inherit it through `synced: true`, so a single failed check
-    // (offline, blocked, captive portal) suppressed every retry for six hours.
-    const ttl = entry.result.confident && entry.result.synced ? CACHE_TTL_OK_MS : CACHE_TTL_OFF_MS;
+    // Only a confident, healthy reading that corrects nothing earns the long
+    // TTL. An unmeasurable one used to inherit it through `synced: true`, so a
+    // single failed check (offline, blocked, captive portal) suppressed every
+    // retry for six hours. And a reading that DOES correct — a clock 3-90s out
+    // is "synced" but still corrected — is the only thing keeping that
+    // correction alive, so it cannot outlive it: served from a six-hour cache,
+    // it re-applied a drift the OS had long since fixed.
+    const longLived = entry.result.confident && entry.result.synced && correctionFor(entry.result) === 0;
+    const ttl = longLived ? CACHE_TTL_OK_MS : CACHE_TTL_OFF_MS;
     // A stamp from the future means the clock moved backwards since we wrote
     // the entry — the exact failure this check exists to catch. Untrusted reads
     // as expired; the old bare subtraction read it as infinitely fresh and
     // turned the check off for good.
     const age = ageOf(entry.cachedAt) ?? Infinity;
-    if (age < ttl) return entry.result;
+    if (age < ttl) return { result: entry.result, age };
   } catch {
     // ignore — cache is best-effort
   }
@@ -198,31 +209,25 @@ async function sample(
   }
 }
 
-// Persist + apply the correction, but only when the reading is confident and
-// within sane bounds. When confident-and-fine, clear any stale correction. When
-// NOT confident, leave the existing correction untouched — a bad reading must
-// never move code generation.
 /**
- * Re-apply a correction we have already measured, without re-persisting it when
- * nothing has changed. Used on the cache-hit path, where the measurement is
- * trusted but the in-memory offset may have been reset since it was taken.
+ * Make code generation follow a measurement `ageMs` old: its correction when it
+ * is confident and within sane bounds, none otherwise.
+ *
+ * A reading we could not take clears the correction rather than leaving it be.
+ * Leaving it be was meant to stop a bad reading from moving code generation,
+ * but 0 does not move it anywhere new — it is the local clock, the historical
+ * default — while keeping the old value meant a correction nobody could vouch
+ * for any more went on being applied, and Settings said "unknown, not
+ * corrected" over codes that were being corrected. Only a confident reading
+ * ever sets a non-zero value, which is the guard that matters.
+ *
+ * The measurement's own age travels with it, so a reading served from the
+ * cache does not come back as a fresh one and extend itself.
  */
-async function reconcileCorrection(result: TimeSyncResult): Promise<void> {
-  const abs = Math.abs(result.offsetMs);
-  const wanted = abs >= CORRECT_DEADZONE_MS && abs <= CORRECT_CAP_MS ? result.offsetMs : 0;
-  if (wanted === getTimeOffsetMs()) return;
-
-  setTimeOffsetMs(wanted);
-  await persistTimeOffset(wanted);
-}
-
-async function applyCorrection(result: TimeSyncResult): Promise<void> {
-  if (!result.confident) return;
-
-  const abs = Math.abs(result.offsetMs);
-  const next = abs >= CORRECT_DEADZONE_MS && abs <= CORRECT_CAP_MS ? result.offsetMs : 0;
-  setTimeOffsetMs(next);
-  await persistTimeOffset(next);
+async function applyCorrection(result: TimeSyncResult, ageMs = 0): Promise<void> {
+  const next = result.confident ? correctionFor(result) : 0;
+  setTimeOffsetMs(next, ageMs);
+  await persistTimeOffset(next, Date.now() - ageMs);
 }
 
 /**
@@ -242,13 +247,17 @@ export interface ClockStatus {
 }
 
 function statusOf(result: TimeSyncResult): ClockStatus {
-  if (!result.confident) return { state: 'unknown', offsetSeconds: 0, corrected: false };
+  // `corrected` is read off what code generation is doing, not derived from
+  // the measurement. Derived, it said "not corrected" for an unknown clock
+  // while a correction from an earlier reading was still being applied — the
+  // one screen meant to explain wrong codes, contradicting them.
+  const corrected = getTimeOffsetMs() !== 0;
+  if (!result.confident) return { state: 'unknown', offsetSeconds: 0, corrected };
 
-  const abs = Math.abs(result.offsetMs);
   return {
     state: result.synced ? 'ok' : 'off',
     offsetSeconds: result.offsetSeconds,
-    corrected: abs >= CORRECT_DEADZONE_MS && abs <= CORRECT_CAP_MS,
+    corrected,
   };
 }
 
@@ -257,15 +266,25 @@ export async function getClockStatus(): Promise<ClockStatus> {
   return statusOf(await checkTimeSync());
 }
 
-/** Measure again now, ignoring the cache — what the "check now" button does. */
-export async function recheckClock(): Promise<ClockStatus> {
+/** Measure now, ignoring the cache. */
+async function remeasure(): Promise<TimeSyncResult> {
   await chrome.storage.local.remove(CACHE_KEY).catch(() => {});
   // Drop any measurement already in flight: it read the cache before we cleared
   // it, so handing the user its answer would make "check now" a button that
   // returns the very reading they pressed it to replace.
   inFlight = null;
-  return statusOf(await checkTimeSync());
+  return checkTimeSync();
 }
+
+/** Measure again now, ignoring the cache — what the "check now" button does. */
+export async function recheckClock(): Promise<ClockStatus> {
+  return statusOf(await remeasure());
+}
+
+// Renewal for pages that stay open: totp.ts asks shortly before a correction
+// lapses, and again the moment it notices the clock was stepped under it. The
+// cache is bypassed on purpose — it holds the very measurement being renewed.
+setTimeOffsetRefresher(remeasure);
 
 // One measurement per popup open, however many callers ask. The banner and the
 // settings line both want the answer, and without this they race each other
@@ -281,21 +300,19 @@ export async function checkTimeSync(): Promise<TimeSyncResult> {
 }
 
 async function measure(): Promise<TimeSyncResult> {
-  // On a cache hit we skip both the network AND re-applying the offset: the
-  // authoritative correction is the one loadTimeOffset() restored at startup
-  // (persisted by the last confident applyCorrection). Touching it here from a
-  // possibly non-confident cached result could wipe a good correction.
   const cached = await readCache();
   if (cached) {
-    // Keep what we report in step with what code generation actually does.
-    // loadTimeOffset may have just discarded the stored correction — expired,
-    // or written by a version that stored no timestamp — while this cached
-    // measurement is recent enough to still be true. Without this, upgrading
-    // from 1.11.0 with a clock 3-90s out silently dropped the correction and
-    // then reported "your clock is fine" for six hours, which is the exact
-    // combination that makes codes fail with nothing on screen to explain it.
-    if (cached.confident) await reconcileCorrection(cached);
-    return cached;
+    // Keep code generation in step with the latest measurement, at that
+    // measurement's age. loadTimeOffset may have just discarded the stored
+    // correction — written by a version that stored no timestamp — while this
+    // cached measurement is recent enough to still be true. Without this,
+    // upgrading from 1.11.0 with a clock 3-90s out silently dropped the
+    // correction and then reported "your clock is fine" for six hours, which
+    // is the exact combination that makes codes fail with nothing on screen to
+    // explain it. The other way round, a cached reading we could not take
+    // clears a correction nothing vouches for any more.
+    await applyCorrection(cached.result, cached.age);
+    return cached.result;
   }
 
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
@@ -316,7 +333,8 @@ async function measure(): Promise<TimeSyncResult> {
       offsetSeconds: Math.round(offsetMs / 1000),
     };
   } else {
-    // Fewer than two agreeing samples → uncertain. Never alarm, never correct.
+    // Fewer than two agreeing samples → uncertain. Never alarm, and
+    // correct nothing: applyCorrection clears whatever an earlier one set.
     result = { synced: true, confident: false, offsetMs: 0, offsetSeconds: 0 };
   }
 

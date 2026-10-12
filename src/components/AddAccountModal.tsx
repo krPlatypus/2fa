@@ -3,6 +3,7 @@ import { Upload, Monitor, Loader2, Camera, ChevronDown } from 'lucide-react';
 import type { Account } from '@/types';
 import { validateSecret, cleanSecret } from '@/utils/totp';
 import { parseQRCode, parseOTPAuthURL, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { saveErrorMessage } from '@/utils/save-error';
 import { captureCurrentTab } from '@/utils/screen-capture';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { ModalHeader } from './ModalHeader';
@@ -19,7 +20,9 @@ interface AddAccountModalProps {
    */
   onAdd: (
     account: Account | Account[],
-    batch?: { index: number; total: number }
+    batch?: { index: number; total: number },
+    /** Entries in a migration code that could not be added (HOTP, damaged). */
+    unsupported?: number
   ) => Promise<void>;
   language: Language;
   /** Existing group names, offered as suggestions — the field stays free text. */
@@ -199,8 +202,11 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       if (parsed) {
         // Parsed QR data contains the secret; not logged.
 
-        // Handle migration (multiple accounts)
-        if (parsed.type === 'migration' && parsed.accounts.length > 1) {
+        // Every migration code goes this way, even one with a single usable
+        // account: the single-account path below drops the batch position and
+        // the skipped count, so "code 1 of 2" with its HOTP entries filtered out
+        // said only "Account added" and the user stopped scanning.
+        if (parsed.type === 'migration') {
           // Prepare all accounts from migration
           const accountsToAdd: Account[] = parsed.accounts.map((accountData, index) => ({
             id: Date.now().toString() + index + Math.random().toString(36).substring(7),
@@ -216,7 +222,13 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
           }));
 
           // Add all accounts through onAdd to ensure state updates
-          await onAdd(accountsToAdd, parsed.batch);
+          try {
+            await onAdd(accountsToAdd, parsed.batch, parsed.skipped ?? 0);
+          } catch (err) {
+            console.error('Could not save the scanned accounts:', err);
+            setError(saveErrorMessage(err, t));
+            return;
+          }
           console.log(`Successfully added ${accountsToAdd.length} accounts from migration`);
           onClose();
           return;
@@ -236,7 +248,13 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
           color: generateRandomColor(),
           ...filteredGroup,
         };
-        await onAdd(account);
+        try {
+          await onAdd(account);
+        } catch (err) {
+          console.error('Could not save the scanned account:', err);
+          setError(saveErrorMessage(err, t));
+          return;
+        }
         onClose();
       } else {
         // The scanned text is never shown. A QR that failed to parse is still
@@ -256,8 +274,9 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         setError(t('addAccount.errorHotp'));
         return;
       }
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      setError(t('addAccount.errorScanFailed', errorMessage));
+      // Only decoding is left in this try — saving has its own — so this is an
+      // image that could not be read, not a reason to print its internals.
+      setError(t('addAccount.errorInvalidQR'));
     }
   };
 

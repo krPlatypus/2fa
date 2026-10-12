@@ -180,6 +180,12 @@ export async function run(): Promise<void> {
   check('the QR layer keeps only the totp entry', viaQr?.accounts.length === 1, String(viaQr?.accounts.length));
   check('and reports the one it dropped', viaQr?.skipped === 1, String(viaQr?.skipped));
 
+  scenario('Spellings of a QR that used to read as invalid');
+  const upper = qr.parseQRCode(`OTPAUTH-MIGRATION://offline?data=${encodeURIComponent(toBase64(mixed))}`);
+  check('an uppercase migration scheme parses', upper?.accounts.length === 1, String(upper?.accounts.length));
+  const percent = qr.parseQRCode('otpauth://totp/50%off:bob?secret=JBSWY3DPEHPK3PXP&issuer=Shop');
+  check('a bare % in the label does not reject the code', percent?.accounts[0]?.name === 'bob', JSON.stringify(percent?.accounts[0]?.name));
+
   scenario('An all-HOTP migration is refused with a reason');
   const allHotp = buildPayload([{ secret: Array.from({ length: 20 }, (_, i) => i + 3), name: 'only', issuer: 'BANK', type: 1 }]);
   let batchRefused = false;
@@ -277,12 +283,25 @@ export async function run(): Promise<void> {
   check('the label carries a literal colon, not %3A', url.includes('Example:a%40b.com'), url);
   check('a space is %20, never +', !qr.buildOTPAuthURL({ ...base, secret, issuer: 'A B', name: 'c d' }).includes('+'));
 
-  // build() omits an empty issuer; parse() fills one in. The asymmetry is the
-  // parser's long-standing behaviour, recorded here so it is a decision rather
-  // than a surprise.
+  // build() omits an empty issuer, and parse() used to fill one in as
+  // "Unknown" — so every account without an issuer came back from its own .txt
+  // backup renamed. Empty in, empty out.
   const noIssuer = roundTrip({ ...base, secret, issuer: '', name: 'lonely@x.com' });
   check('an account with no issuer keeps its name', noIssuer?.name === 'lonely@x.com', String(noIssuer?.name));
-  check('and is read back as "Unknown"', noIssuer?.issuer === 'Unknown', String(noIssuer?.issuer));
+  check('and comes back with no issuer, not "Unknown"', noIssuer?.issuer === '', String(noIssuer?.issuer));
+
+  scenario('A record without algorithm, digits or period still exports a usable link');
+  // Records imported from files that lacked these fields exist on disk. The
+  // .txt export wrote `algorithm=undefined&digits=undefined&period=undefined`.
+  const bare = qr.buildOTPAuthURL({ name: 'n', issuer: 'I', secret } as any);
+  check('no "undefined" in the link', !bare.includes('undefined'), bare.replace(/secret=[^&]+/, 'secret=…'));
+  check('the defaults are written out', /algorithm=SHA1&digits=6&period=30/.test(bare));
+
+  scenario('Padding does not count towards the length of a secret');
+  // Eight characters, no key: HMAC over nothing yields a confident code.
+  check('`A=======` is not usable', !totp.isUsableSecret('A======='));
+  check('`==` is not usable', !totp.isUsableSecret('=='));
+  check('a padded real secret still is', totp.isUsableSecret('JBSWY3DPEHPK3PXP===='));
 
   scenario('A pasted list of links is read line by line');
   const uriImport = await import('@/utils/uri-import');

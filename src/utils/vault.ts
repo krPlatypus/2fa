@@ -32,6 +32,7 @@ import {
 } from './crypto';
 import { ageOf } from './clock';
 import { isSyncEnabled } from './sync-preference';
+import { SESSION_LOCK, withAccountsLock, withLock } from './write-lock';
 
 const VAULT_META_KEY = 'vault_meta';
 const SESSION_KEY = 'vault_session';
@@ -342,6 +343,13 @@ export async function getVaultMeta(): Promise<VaultMeta | null> {
 export async function reconcileVaultMeta(): Promise<VaultMeta | null> {
   const localMeta = await getVaultMeta();
 
+  // A device with sync switched off does not take its vault from sync. It used
+  // to: with no local metadata, whatever another machine had put up was adopted
+  // on the spot, and a device that had never had a vault — whose user had
+  // turned sync off precisely to keep it apart — opened on a lock screen for
+  // someone else's password, with its own accounts behind it.
+  if (!(await isSyncEnabled())) return localMeta ?? null;
+
   let syncedMeta: VaultMeta | undefined;
   try {
     syncedMeta = (await chrome.storage.sync.get(VAULT_META_KEY))[VAULT_META_KEY] as
@@ -403,11 +411,14 @@ export async function saveVaultMeta(meta: VaultMeta): Promise<void> {
     // Unreadable — the counter can only be too low, never wrong in a way that
     // loses a change: a later write on any device will pass it.
   }
-  try {
-    const synced = (await chrome.storage.sync.get(VAULT_META_KEY))[VAULT_META_KEY] as VaultMeta | undefined;
-    seen = Math.max(seen, metaRevision(synced));
-  } catch {
-    // Sync unavailable — same reasoning.
+  const syncOn = await isSyncEnabled();
+  if (syncOn) {
+    try {
+      const synced = (await chrome.storage.sync.get(VAULT_META_KEY))[VAULT_META_KEY] as VaultMeta | undefined;
+      seen = Math.max(seen, metaRevision(synced));
+    } catch {
+      // Sync unavailable — same reasoning.
+    }
   }
 
   meta = { ...meta, rev: seen + 1, updatedAt: Date.now() };
@@ -416,17 +427,19 @@ export async function saveVaultMeta(meta: VaultMeta): Promise<void> {
   // the account list does not, so cross-device unlock keeps working. It must
   // honour the sync preference: this is the wrapped master key, and leaving it
   // on Google's servers after the user asked us to stop syncing would make the
-  // setting a lie.
-  if (await isSyncEnabled()) {
+  // setting a lie. Turning sync off already removed it (setSyncEnabled); with
+  // sync off this device leaves the area alone, because what is up there now
+  // was put there by another machine, for that machine's other devices.
+  if (syncOn) {
     chrome.storage.sync.set({ [VAULT_META_KEY]: meta }).catch(() => {});
-  } else {
-    chrome.storage.sync.remove(VAULT_META_KEY).catch(() => {});
   }
 }
 
 export async function clearVaultMeta(): Promise<void> {
   await chrome.storage.local.remove(VAULT_META_KEY);
-  chrome.storage.sync.remove(VAULT_META_KEY).catch(() => {});
+  // Same rule as saveVaultMeta: a sync-off device switching its own vault off
+  // must not delete the metadata a sync-on machine's ciphertext depends on.
+  if (await isSyncEnabled()) chrome.storage.sync.remove(VAULT_META_KEY).catch(() => {});
 }
 
 /**
@@ -504,6 +517,11 @@ export async function unlockWithRecoveryCode(code: string): Promise<Uint8Array> 
 }
 
 export async function lock(): Promise<void> {
+  await withLock(SESSION_LOCK, lockNow);
+}
+
+/** `lock` for code already holding the session lock. */
+async function lockNow(): Promise<void> {
   clearKeyCache();
   await writeSession(null);
   // A staged hand-off is an unlocked key by another name. Leaving one behind
@@ -547,9 +565,31 @@ export async function attachPasskey(
     throw new Error('Passkey wrapper did not round-trip; nothing was saved');
   }
 
-  await saveVaultMeta({
-    ...meta,
+  await updateVaultMeta(meta.vaultId, current => ({
+    ...current,
     passkey: { credentialId, prfSalt, wrapped, label, addedAt: Date.now() },
+  }));
+}
+
+/**
+ * Write a change to the metadata, spread over the copy on disk NOW.
+ *
+ * Every caller does slow crypto first — PBKDF2 at 600 000 iterations, a
+ * passkey ceremony — and spreading the copy it read before that over whatever
+ * happened meanwhile undid it: a password changed in the side panel while the
+ * passkey page was registering came back as the old password, which is then
+ * the only one that works, and the one the user just replaced. Under the
+ * accounts lock, re-read, refuse if the vault is not the one the change was
+ * built for (a wrapper of this master key opens nothing else), and only then
+ * write.
+ */
+async function updateVaultMeta(vaultId: string, change: (current: VaultMeta) => VaultMeta): Promise<void> {
+  await withAccountsLock(async () => {
+    const current = await getVaultMeta();
+    if (!current || current.vaultId !== vaultId) {
+      throw new Error('Password protection was changed somewhere else — nothing was changed');
+    }
+    await saveVaultMeta(change(current));
   });
 }
 
@@ -577,11 +617,13 @@ export async function unlockWithPasskey(prfOutput: Uint8Array): Promise<Uint8Arr
  * so this can never leave the vault unopenable.
  */
 export async function detachPasskey(): Promise<void> {
-  const meta = await reconcileVaultMeta();
-  if (!meta || !meta.passkey) return;
+  await withAccountsLock(async () => {
+    const meta = await reconcileVaultMeta();
+    if (!meta || !meta.passkey) return;
 
-  const { passkey: _removed, ...withoutPasskey } = meta;
-  await saveVaultMeta(withoutPasskey as VaultMeta);
+    const { passkey: _removed, ...withoutPasskey } = meta;
+    await saveVaultMeta(withoutPasskey as VaultMeta);
+  });
 }
 
 export async function getAutoLockMinutes(): Promise<number> {
@@ -602,16 +644,24 @@ export async function setAutoLockMinutes(minutes: number): Promise<void> {
  * deadline either way because every read goes through this function.
  */
 export async function getMasterKeyBytes(): Promise<Uint8Array | null> {
-  const session = await readSession();
-  if (!session) return null;
+  // Read, check and refresh as one step against "Lock now". The refresh writes
+  // the whole session back, key included, so a read that had fetched the
+  // session just before a lock in another context — quick fill in the service
+  // worker, say, while the popup's Lock button was pressed — wrote the key
+  // straight back after the lock had removed it. The vault said "locked" and
+  // stayed open.
+  return withLock(SESSION_LOCK, async () => {
+    const session = await readSession();
+    if (!session) return null;
 
-  if (await pastIdleDeadline(session)) {
-    await lock();
-    return null;
-  }
+    if (await pastIdleDeadline(session)) {
+      await lockNow();
+      return null;
+    }
 
-  await writeSession({ ...session, lastActivity: Date.now() });
-  return fromBase64(session.mk);
+    await writeSession({ ...session, lastActivity: Date.now() });
+    return fromBase64(session.mk);
+  });
 }
 
 async function pastIdleDeadline(session: SessionState): Promise<boolean> {
@@ -640,11 +690,13 @@ async function pastIdleDeadline(session: SessionState): Promise<boolean> {
  * vault open by itself.
  */
 export async function enforceAutoLock(): Promise<boolean> {
-  const session = await readSession();
-  if (!session) return true;
-  if (!(await pastIdleDeadline(session))) return false;
-  await lock();
-  return true;
+  return withLock(SESSION_LOCK, async () => {
+    const session = await readSession();
+    if (!session) return true;
+    if (!(await pastIdleDeadline(session))) return false;
+    await lockNow();
+    return true;
+  });
 }
 
 /**
@@ -699,9 +751,12 @@ export async function changePassword(currentPassword: string, newPassword: strin
   const masterKeyBytes = await unwrapWith(meta, currentPassword, 'salt', 'wrappedByPassword');
   const salt = newSalt();
   const passwordKey = await deriveKeyFromPassword(newPassword, salt);
+  const wrappedByPassword = await wrapMasterKey(masterKeyBytes, passwordKey);
 
-  await saveVaultMeta({
-    ...meta,
+  // Spread over the copy on disk after both derivations, not the one read
+  // before them: a passkey registered meanwhile used to vanish here.
+  await updateVaultMeta(meta.vaultId, current => ({
+    ...current,
     salt: toBase64(salt),
     // The wrapper was just built at PBKDF2_ITERATIONS, and unwrapWith derives
     // at whatever meta.iterations says. Spreading the old count forward left
@@ -712,21 +767,40 @@ export async function changePassword(currentPassword: string, newPassword: strin
     // never fired; a one-line bump of the constant, or metadata arriving by
     // sync from a build with a different one, is all it would take.
     iterations: PBKDF2_ITERATIONS,
-    wrappedByPassword: await wrapMasterKey(masterKeyBytes, passwordKey),
-  });
+    wrappedByPassword,
+  }));
 
   await writeSession({ mk: toBase64(masterKeyBytes), lastActivity: Date.now() });
 }
 
+export interface PreparedRecovery {
+  /** Show this and have it typed back BEFORE calling commit(). */
+  recoveryCode: string;
+  /**
+   * Replaces the password and recovery wrappers and unlocks. Until this
+   * resolves, the old password and the old recovery code both still work.
+   */
+  commit: () => Promise<void>;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
+}
+
 /**
- * Sets a new password after a recovery-code unlock, and rotates the recovery
- * code — the old one was just read aloud from a screen or a text file, so it
- * has to be treated as spent.
+ * A forgotten-password reset, built and verified in memory, with nothing written.
+ *
+ * Split from the commit for the same reason prepareVault is. The reset rotates
+ * the recovery code — the old one was just read off a screen or out of a text
+ * file, so it has to be treated as spent — and the moment the new wrappers are
+ * saved, the replacement exists nowhere but in memory. This used to save first
+ * and show the code afterwards. Saving also writes the unlocked key to session
+ * storage; the popup's storage listener reads that as "unlocked" and swaps the
+ * lock screen for the account list, so the new code vanished before it could be
+ * read. The user was let in once, and the next time they forgot the password
+ * the only code they held was refused.
  */
-export async function resetPasswordWithRecoveryCode(
-  code: string,
-  newPassword: string
-): Promise<string> {
+export async function prepareRecovery(code: string, newPassword: string): Promise<PreparedRecovery> {
   const meta = await reconcileVaultMeta();
   if (!meta) throw new Error('No vault configured');
 
@@ -739,12 +813,16 @@ export async function resetPasswordWithRecoveryCode(
 
   const salt = newSalt();
   const recoverySalt = newSalt();
-  const newRecoveryCode = generateRecoveryCode();
-  const passwordKey = await deriveKeyFromPassword(newPassword, salt);
-  const recoveryKey = await deriveKeyFromPassword(normalizeRecoveryCode(newRecoveryCode), recoverySalt);
+  const recoveryCode = generateRecoveryCode();
+  const [passwordKey, recoveryKey] = await Promise.all([
+    deriveKeyFromPassword(newPassword, salt),
+    deriveKeyFromPassword(normalizeRecoveryCode(recoveryCode), recoverySalt),
+  ]);
 
-  await saveVaultMeta({
-    ...meta,
+  const wrappers: Pick<
+    VaultMeta,
+    'salt' | 'iterations' | 'wrappedByPassword' | 'recoverySalt' | 'wrappedByRecovery'
+  > = {
     salt: toBase64(salt),
     // Both wrappers are new, so the count that describes them must be too —
     // see changePassword.
@@ -752,10 +830,43 @@ export async function resetPasswordWithRecoveryCode(
     wrappedByPassword: await wrapMasterKey(masterKeyBytes, passwordKey),
     recoverySalt: toBase64(recoverySalt),
     wrappedByRecovery: await wrapMasterKey(masterKeyBytes, recoveryKey),
-  });
+  };
 
-  await writeSession({ mk: toBase64(masterKeyBytes), lastActivity: Date.now() });
-  return newRecoveryCode;
+  // Opened again the way unlocking will open them — a fresh derivation at the
+  // stored iteration count, through the same normalisation — rather than with
+  // the keys already in hand. A wrapper that only opens with the key object that
+  // built it looks fine today and fails on the one day it is needed.
+  const candidate: VaultMeta = { ...meta, ...wrappers };
+  const opened = await Promise.all([
+    unwrapWith(candidate, newPassword, 'salt', 'wrappedByPassword'),
+    unwrapWith(candidate, normalizeRecoveryCode(recoveryCode), 'recoverySalt', 'wrappedByRecovery'),
+  ]).catch(() => null);
+  if (!opened || !opened.every(bytes => sameBytes(bytes, masterKeyBytes))) {
+    throw new Error('The new password could not be verified — nothing was changed');
+  }
+
+  let committing: Promise<void> | null = null;
+
+  const commit = (): Promise<void> => {
+    committing ??= (async () => {
+      // Asked again, not only in prepare: the screen between the two is one the
+      // user lingers on, copying a code onto paper, and another window can turn
+      // protection off or rebuild the vault meanwhile. This master key opens
+      // only the vault it was unwrapped from; written over any other, the new
+      // password would open nothing.
+      //
+      // Spread over the copy read just now, not the one from prepare, so a
+      // passkey added in between survives the reset.
+      await updateVaultMeta(meta.vaultId, current => ({ ...current, ...wrappers }));
+      await writeSession({ mk: toBase64(masterKeyBytes), lastActivity: Date.now() });
+    })().catch(error => {
+      committing = null;
+      throw error;
+    });
+    return committing;
+  };
+
+  return { recoveryCode, commit };
 }
 
 /** Verifies a password without changing session state. */

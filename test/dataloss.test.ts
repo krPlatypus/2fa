@@ -42,6 +42,72 @@ export async function run(): Promise<void> {
   await flush();
   check('an explicit delete is still allowed', (areas.local.authenticator_accounts as any[]).length === 2);
 
+  // A user with 11 accounts had 22 records on disk: sync held the same seeds
+  // spelled differently, the merge took them for new accounts, decode folded
+  // them back. Every add then wrote "11 + 1" over 22 and was refused, forever.
+  const respelled = ACCOUNTS.map(a => ({ ...a, id: `${a.id}-sync`, secret: a.secret.toLowerCase().replace(/(.{4})/g, '$1 ').trim() }));
+  const extra = { id: 'a4', name: 'new', issuer: 'pub', secret: 'NSY2V7QAAAAAAAAA', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 4 };
+
+  scenario('The merge does not take a respelled seed for a new account');
+  await resetState();
+  await storage.saveAccounts(respelled);
+  await flush();
+  areas.local.authenticator_accounts = ACCOUNTS.map(a => ({ ...a }));
+  await storage.getAccounts();
+  check('local keeps one record per seed', (areas.local.authenticator_accounts as any[]).length === 3,
+    `${(areas.local.authenticator_accounts as any[]).length} records`);
+
+  scenario('A store already holding duplicates still accepts new accounts');
+  await resetState();
+  areas.local.authenticator_accounts = [...ACCOUNTS.map(a => ({ ...a })), ...respelled];
+  check('the duplicates are folded for display', (await storage.getAccounts()).length === 3);
+  let addError: unknown = null;
+  await storage.addAccount(extra as any).catch(e => { addError = e; });
+  check('adding an account succeeds', addError === null, String(addError));
+  check('the new account is there', (await storage.getAccounts()).some(a => a.id === 'a4'));
+  check('writing fewer than the visible accounts is still refused',
+    await throwsNamed('Error', () => storage.saveAccounts([ACCOUNTS[0]])));
+
+  // A fresh install holds its first push until sync has had time to download.
+  // The replay of that push used to carry local only, and prune the rest.
+  scenario('Replaying a held push keeps the accounts that arrived from sync');
+  await resetStateFreshProfile();
+  await storage.getAccounts();
+  await storage.addAccount({ ...extra, id: 'fresh' } as any);
+  await flush();
+  const fromOldMachine = Array.from({ length: 30 }, (_, i) => ({
+    ...ACCOUNTS[0], id: `o${i}`, name: 'x'.repeat(300), secret: 'JBSWY3DPEHPK3PX' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[i],
+  }));
+  areas.sync.authenticator_accounts_0 = fromOldMachine.slice(0, 15);
+  areas.sync.authenticator_accounts_1 = fromOldMachine.slice(15);
+  check('this device sees both', (await storage.getAccounts()).length === 31);
+  await flush();
+  const inCloud = syncAccountKeys().reduce((n, k) => n + (areas.sync[k] as any[]).length, 0);
+  check('the cloud copy keeps all of them', inCloud === 31, `${inCloud} in sync`);
+
+  // A password-manager export can carry one TOTP on two items, or one seed in
+  // two spellings. Both were stored, one was folded away on display, and the
+  // count said two were added.
+  scenario('Import folds duplicates inside the file and never reuses an id');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  const importFile = [
+    { ...extra, id: 'a1' },                                         // new seed, taken id
+    { ...extra, id: 'x2', secret: extra.secret.toLowerCase() },     // same seed again
+  ];
+  const imported = await storage.importAccounts(JSON.stringify(importFile));
+  const afterImport = await storage.getAccounts();
+  check('one account is reported added', imported.added === 1, String(imported.added));
+  check('one record is written', (areas.local.authenticator_accounts as any[]).length === 4,
+    `${(areas.local.authenticator_accounts as any[]).length} records`);
+  check('every id is unique', new Set(afterImport.map(a => a.id)).size === afterImport.length);
+  check('the original a1 is untouched', afterImport.find(a => a.id === 'a1')?.secret === ACCOUNTS[0].secret);
+
+  scenario('Adding a seed that is already here says so');
+  check('a new seed reports added', await storage.addAccount({ ...extra, id: 'y1', secret: 'KRUGS4ZANFZSAYJA' } as any));
+  check('the same seed again reports not added',
+    !(await storage.addAccount({ ...extra, id: 'y2', secret: 'kruGS4ZA NFZSAYJA' } as any)));
+
   // A drag in the popup used to delete anything the stale React state had not
   // mentioned — e.g. an account the scanner tab had just added.
   scenario('Reorder with a stale id list keeps the accounts it was not told about');
@@ -78,6 +144,7 @@ export async function run(): Promise<void> {
   const afterOrphan = await storage.getAccounts();
   check('the readable accounts still load', afterOrphan.length === 3, `got ${afterOrphan.length}`);
   check('the unreadable record is quarantined, not counted', storage.quarantinedCount() === 1);
+  check('another vault\'s record is counted as locked away', storage.lockedAwayCount() === 1);
   await storage.updateAccount('a1', { issuer: 'GitHub Inc' });
   await flush();
   check('a later save keeps the quarantined record', JSON.stringify(areas.local.authenticator_accounts).includes(orphan.enc));
@@ -326,4 +393,163 @@ export async function run(): Promise<void> {
     check('and whitespace is no label at all', (await storage.getAccounts())[0].label === undefined);
   }
 
+
+  // --- sync switched off on this device -----------------------------------
+  //
+  // The sync area belongs to the Google account, not to this machine: every
+  // Chrome signed in to it shares it. Turning sync off here purges it once —
+  // the setting promises exactly that — and from then on this device stays out
+  // of it. It used to go on reading it, adopting it, and wiping it.
+
+  scenario('A device with sync off leaves the other machines’ cloud copy alone');
+  await resetState();
+  await storage.saveAccounts([ACCOUNTS[0]]);
+  await storage.setSyncEnabled(false);
+  await flush();
+  // Another machine, sync on, puts its own accounts up afterwards.
+  areas.sync.authenticator_accounts_0 = [ACCOUNTS[1], ACCOUNTS[2]];
+  {
+    const here = (await storage.getAccounts()).map(a => a.id).join();
+    check('its accounts are not pulled onto this device', here === 'a1', here);
+    await storage.updateAccount('a1', { name: 'renamed' });
+    await storage.addAccount({ ...ACCOUNTS[0], id: 'a4', secret: 'NBSWY3DPEB3W64TM' });
+    await flush();
+    check('and a save here does not delete them from sync', syncAccountKeys().length === 1 && (areas.sync.authenticator_accounts_0 as any[]).length === 2);
+  }
+
+  scenario('A device with sync off is not locked behind another machine’s password');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  await storage.setSyncEnabled(false);
+  {
+    // The other machine switches protection on and its metadata syncs up.
+    const other = await vault.createVaultMeta('the other machine’s password');
+    areas.sync.vault_meta = other.meta;
+    check('this device still has no vault', !(await vault.isVaultEnabled()));
+    check('its metadata is not adopted', !('vault_meta' in areas.local));
+    const here = await storage.getAccounts().catch(error => error);
+    check('and the accounts open without anyone’s password', Array.isArray(here) && here.length === 3, String(here));
+  }
+
+  // --- records that are not accounts --------------------------------------
+
+  // One `null` in local — or in a sync chunk, which every device reads — made
+  // every read throw; after the retries that is "Failed to load accounts" on
+  // every machine sharing the area, with the data still on disk.
+  for (const where of ['local', 'sync'] as const) {
+    scenario(`A null record in ${where} does not stop the list loading`);
+    await resetState();
+    await storage.saveAccounts(ACCOUNTS);
+    await flush();
+    const junk = [null, 'garbage', {}, { id: 'n', secret: 12345 }];
+    if (where === 'local') {
+      areas.local.authenticator_accounts = [...(areas.local.authenticator_accounts as any[]), ...junk];
+    } else {
+      areas.sync.authenticator_accounts_0 = [...(areas.sync.authenticator_accounts_0 as any[]), ...junk];
+    }
+    const loaded = await storage.getAccounts().catch(error => error);
+    check('the list loads', Array.isArray(loaded), String(loaded));
+    check('with the three real accounts and nothing else', Array.isArray(loaded) && loaded.length === 3 && loaded.every((a: any) => typeof a.id === 'string'));
+    check('the rest is held, not shown', storage.quarantinedCount() === junk.length, String(storage.quarantinedCount()));
+    // Held, but not an account under some other password — the banner that
+    // says so sent people with protection off looking for one.
+    check('and not counted as locked away', storage.lockedAwayCount() === 0, String(storage.lockedAwayCount()));
+    const added = await storage.addAccount({ ...ACCOUNTS[0], id: 'a4', secret: 'NBSWY3DPEB3W64TM' }).catch(error => error);
+    check('an account can still be added', added === true, String(added));
+    const kept = areas.local.authenticator_accounts as any[];
+    check('a save keeps what it could not read', kept.includes(null) && kept.includes('garbage'), JSON.stringify(kept.slice(-5)));
+  }
+
+  // Two records carrying one id — a hand-edited backup, an older import — meant
+  // deleting either card deleted both, and a drag wrote one of them twice and
+  // lost the other.
+  scenario('Accounts sharing an id are told apart');
+  await resetState();
+  {
+    const dup = [
+      { ...ACCOUNTS[0], id: 'dup' },
+      { ...ACCOUNTS[1], id: 'dup', name: 'second' },
+      ACCOUNTS[2],
+      { ...ACCOUNTS[0], id: undefined, secret: 'NBSWY3DPEB3W64TM', name: 'no id' },
+    ];
+    delete (dup[3] as any).id;
+    areas.local.authenticator_accounts = dup;
+    const loaded = await storage.getAccounts();
+    const ids = loaded.map(a => a.id);
+    check('every account has an id of its own', ids.length === 4 && new Set(ids).size === 4 && ids.every(id => typeof id === 'string' && id), JSON.stringify(ids));
+    check('and the repair is written down', new Set((areas.local.authenticator_accounts as any[]).map(r => r.id)).size === 4);
+
+    await storage.reorderAccounts(['a3', 'dup', 'dup']);
+    const secrets = (await storage.getAccounts()).map(a => a.secret);
+    check('a drag naming an id twice keeps every account once', new Set(secrets).size === 4 && secrets.length === 4, JSON.stringify(secrets));
+
+    await storage.deleteAccount('dup');
+    const left = (await storage.getAccounts()).map(a => a.name);
+    check('deleting one card deletes one account', left.length === 3 && left.includes('second'), JSON.stringify(left));
+  }
+
+  // `issuer: null` is in real stores. Search, the site suggestion and quick
+  // fill all call .toLowerCase() on it, and one such account blanked the popup
+  // the moment anything was typed.
+  scenario('Text fields come out of storage as text');
+  await resetState();
+  areas.local.authenticator_accounts = [
+    { ...ACCOUNTS[0], issuer: null },
+    { ...ACCOUNTS[1], name: null, group: 7 },
+  ];
+  {
+    const loaded = await storage.getAccounts();
+    check('issuer, name and group are strings or absent',
+      loaded.every(a => typeof a.name === 'string' && typeof a.issuer === 'string' && (a.group === undefined || typeof a.group === 'string')),
+      JSON.stringify(loaded.map(a => [a.name, a.issuer, a.group])));
+    const suggestions = await import('@/utils/suggestions');
+    const suggested = await suggestions.getSuggestedAccountId('github.com', loaded).then(() => 'ok', error => String(error));
+    check('and the site suggestion does not throw on them', suggested === 'ok', suggested);
+  }
+
+  // --- deletions that come back --------------------------------------------
+
+  // The marker hashed the raw secret while the merge compares the normalised
+  // one: a sync copy spelling the seed differently — an older device's
+  // `jbsw y3dp…` for this one's `JBSWY3DP…` — matched no marker and came back.
+  scenario('A deleted account does not return in another spelling');
+  await resetState();
+  await storage.saveAccounts([ACCOUNTS[0], ACCOUNTS[1]]);
+  await flush();
+  faults.failSyncSet = true; // the sync copy never catches up
+  areas.sync.authenticator_accounts_0 = [
+    { ...ACCOUNTS[0], secret: 'jbsw y3dp ehpk 3pxp' },
+    ACCOUNTS[1],
+  ];
+  await storage.deleteAccount('a1');
+  await flush();
+  {
+    const ids = (await storage.getAccounts()).map(a => a.id).join();
+    faults.failSyncSet = false;
+    check('it stays deleted', ids === 'a2', ids);
+  }
+
+  // Two records of one seed show as one card. Deleting that card has to take
+  // the hidden copy's marker too, or the copy's own sync record brings it back.
+  scenario('Deleting an account also retires its hidden copies');
+  await resetState();
+  {
+    const hidden = { ...ACCOUNTS[0], id: 'hidden', secret: 'JBSWY3DPEHPK3PXP======' };
+    areas.local.authenticator_accounts = [ACCOUNTS[0], hidden, ACCOUNTS[1]];
+    areas.sync.authenticator_accounts_0 = [ACCOUNTS[0], hidden, ACCOUNTS[1]];
+    faults.failSyncSet = true;
+    await storage.deleteAccount('a1');
+    await flush();
+    const ids = (await storage.getAccounts()).map(a => a.id).join();
+    faults.failSyncSet = false;
+    check('neither copy comes back', ids === 'a2', ids);
+  }
+
+  scenario('Editing an account that is already gone says so');
+  await resetState();
+  await storage.saveAccounts([ACCOUNTS[0]]);
+  check('found and saved', (await storage.updateAccount('a1', { name: 'x' })) === true);
+  const revisionBefore = areas.local.authenticator_accounts_rev;
+  check('gone', (await storage.updateAccount('deleted-elsewhere', { name: 'x' })) === false);
+  check('and nothing is written', areas.local.authenticator_accounts_rev === revisionBefore);
 }

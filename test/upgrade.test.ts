@@ -253,7 +253,9 @@ export async function run(): Promise<void> {
     check('parameters survive', parsed?.digits === 6 && parsed?.period === 30 && parsed?.algorithm === 'SHA1');
 
     const bare = qr.parseOTPAuthURL('otpauth://totp/vpn?secret=MFRGGZDFMZTWQ2LK');
-    check('a label with no issuer still parses', bare?.name === 'vpn' && bare?.issuer === 'Unknown');
+    // Issuer empty rather than the invented "Unknown" since 1.13.3's import
+    // fixes: the .txt round trip renamed every issuer-less account otherwise.
+    check('a label with no issuer still parses', bare?.name === 'vpn' && bare?.issuer === '');
 
     // New tolerance, nothing taken away — checked through parseQRCode, which is
     // what scanning, uploading, pasting and importing all actually call. Testing

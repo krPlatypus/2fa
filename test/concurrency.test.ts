@@ -11,7 +11,7 @@
 // The length guard in saveAccounts does not see it: eleven written over eleven
 // is not a shrink. These scenarios are the ones that guard actually misses.
 
-import { areas, check, flush, resetState, scenario } from './harness';
+import { areas, check, flush, resetState, scenario, setWebLocks, storageContext, withLatency } from './harness';
 
 const account = (id: string, secret: string) => ({
   id,
@@ -200,4 +200,157 @@ export async function run(): Promise<void> {
     storedIds().join() === 'a1,c3',
     storedIds().join()
   );
+
+  // Every open surface reloads on onChanged, so the local write inside a delete
+  // triggers a read while sync still holds the old list. With the tombstone
+  // written only after the save, that read merged the account straight back.
+  // The mocked storage resolves as microtasks and never shows the race, so this
+  // one runs with real latency.
+  for (const withVault of [false, true]) {
+    scenario(`A reload during a delete does not bring the account back${withVault ? ' (vault on)' : ''}`);
+    await resetState();
+    await storage.saveAccounts([account('a1', SEEDS[0]), account('b2', SEEDS[1])] as any);
+    await flush();
+    if (withVault) {
+      await (await storage.prepareVault('correct horse battery staple')).commit();
+      await flush();
+    }
+    const restore = withLatency(2);
+    const reload = (changes: any, area: string) => {
+      if (storage.affectsStoredAccounts(area, changes)) storage.getAccounts().catch(() => {});
+    };
+    chrome.storage.onChanged.addListener(reload);
+    try {
+      await storage.deleteAccount('b2');
+      await new Promise(resolve => setTimeout(resolve, 50));
+      await flush();
+    } finally {
+      chrome.storage.onChanged.removeListener(reload);
+      restore();
+    }
+    const visible = (await storage.getAccounts()).map(a => a.id).join();
+    check('the deleted account stays deleted', visible === 'a1', visible);
+  }
+
+  // --- separate contexts ---------------------------------------------------
+  //
+  // Everything above runs in ONE module instance, where the in-context queue
+  // alone serialises the writers. A popup and the scanner tab are two instances
+  // that share nothing but chrome.storage and navigator.locks — which is where
+  // the 1.13.0 revision check lost: it compared the stamp, then encrypted, read
+  // for the shrink guard and read the stamp again before writing, and the other
+  // context's write landed in between. Measured with 1–5 ms of latency: a delete
+  // racing an add brought the deleted account back 48 times in 50.
+
+  const kinds = ['delete', 'add', 'edit', 'reorder'] as const;
+  const losses: Record<(typeof kinds)[number], string[]> = { delete: [], add: [], edit: [], reorder: [] };
+  const restoreLatency = withLatency(2);
+  try {
+    for (let round = 0; round < 4; round++) {
+      for (const kind of kinds) {
+        await resetState();
+        const base = [account('a1', SEEDS[0]), account('a2', SEEDS[1])];
+        areas.local.authenticator_accounts = base;
+        areas.sync.authenticator_accounts_0 = base;
+
+        const tag = `${kind}-${round}`;
+        const [popup, scanner] = [await storageContext(`p-${tag}`), await storageContext(`s-${tag}`)];
+        // Every open surface reloads on onChanged, as useAccounts does.
+        const reloads = [popup, scanner].map(ctx => (changes: any, area: string) => {
+          if (ctx.affectsStoredAccounts(area, changes)) ctx.getAccounts().catch(() => {});
+        });
+        reloads.forEach(listener => chrome.storage.onChanged.addListener(listener));
+
+        const first = {
+          delete: () => popup.deleteAccount('a1'),
+          add: () => popup.addAccount(account('x3', SEEDS[2]) as any),
+          edit: () => popup.updateAccount('a2', { name: 'renamed' }),
+          reorder: () => popup.reorderAccounts(['a2', 'a1']),
+        }[kind];
+        // Offsets across the window the old check left open: the second writer
+        // starts while the first is between its read and its write.
+        const offset = round * 4;
+        await Promise.all([
+          first(),
+          new Promise(resolve => setTimeout(resolve, offset)).then(() =>
+            scanner.addAccount(account('y4', SEEDS[3]) as any)
+          ),
+        ]);
+        await new Promise(resolve => setTimeout(resolve, 40));
+        // Reopened a few times, from both sides, so a loss that a later merge
+        // would paper over — or a resurrection a later read would cause — shows.
+        for (let i = 0; i < 2; i++) {
+          await popup.getAccounts();
+          await scanner.getAccounts();
+        }
+        await new Promise(resolve => setTimeout(resolve, 40));
+        reloads.forEach(listener => chrome.storage.onChanged.removeListener(listener));
+
+        const ids = (await popup.getAccounts()).map(a => a.id).sort().join();
+        const expected = {
+          delete: 'a2,y4',
+          add: 'a1,a2,x3,y4',
+          edit: 'a1,a2,y4',
+          reorder: 'a1,a2,y4',
+        }[kind];
+        if (ids !== expected) losses[kind].push(`offset ${offset}: ${ids}`);
+        if (kind === 'edit' && !(await popup.getAccounts()).some(a => a.name === 'renamed')) {
+          losses.edit.push(`offset ${offset}: the rename was lost`);
+        }
+      }
+    }
+  } finally {
+    restoreLatency();
+  }
+
+  scenario('A delete in one window and an add in another: gone stays gone, added stays added');
+  check('in every round', losses.delete.length === 0, losses.delete.join('; '));
+  scenario('Two windows adding at once keep both accounts');
+  check('in every round', losses.add.length === 0, losses.add.join('; '));
+  scenario('A rename in one window and an add in another keep both');
+  check('in every round', losses.edit.length === 0, losses.edit.join('; '));
+  scenario('A drag in one window and an add in another keep every account');
+  check('in every round', losses.reorder.length === 0, losses.reorder.join('; '));
+
+  // A delete writes its marker first and its list second (see deleteAccount).
+  // Any save landing between the two used to call forgetDeleted for every
+  // identity in ITS list — which still held the account being deleted — and
+  // wiped the marker. The delete's own write then removed the record from
+  // local, but with no marker the stale sync copy merged it straight back, for
+  // good. Replayed here step by step, as another context would interleave.
+  scenario('A save that does not add an account leaves a deletion marker alone');
+  await resetState();
+  areas.local.authenticator_accounts = [account('a1', SEEDS[0]), account('a2', SEEDS[1])];
+  areas.sync.authenticator_accounts_0 = [account('a1', SEEDS[0]), account('a2', SEEDS[1])];
+  {
+    const other = await storageContext('marker-other');
+    const tombstones = await import('@/utils/tombstones');
+    // The deleting context has written its marker and not yet its list.
+    await tombstones.markDeleted([SEEDS[0]]);
+    await other.updateAccount('a2', { name: 'renamed' });
+    await flush();
+    const wasDeleted = await tombstones.deletedHere();
+    check('the marker survives a save that merely still held the account', await wasDeleted(SEEDS[0]));
+    // The delete's own write lands; sync still holds a1, as it does whenever
+    // the push is slow or refused.
+    areas.local.authenticator_accounts = (areas.local.authenticator_accounts as any[]).filter(r => r.id !== 'a1');
+    areas.sync.authenticator_accounts_0 = [account('a1', SEEDS[0]), account('a2', SEEDS[1])];
+    const ids = (await other.getAccounts()).map(a => a.id).join();
+    check('and the deleted account stays out', ids === 'a2', ids);
+  }
+
+  // Web Locks are missing on old Chrome builds; the in-context queue must still
+  // serialise one window's own writers, as it did before the lock existed.
+  scenario('Without Web Locks one window still never loses its own writes');
+  setWebLocks(false);
+  try {
+    await resetState();
+    await storage.saveAccounts([account('a1', SEEDS[0])]);
+    await Promise.all(SEEDS.slice(1, 4).map((seed, i) => storage.addAccount(account(`n${i}`, seed) as any)));
+    await flush();
+    check('every add landed', storedIds().join() === 'a1,n0,n1,n2', storedIds().join());
+  } finally {
+    setWebLocks(true);
+  }
 }
+

@@ -268,7 +268,8 @@ export function parseMigrationURL(url: string): MigrationPayload | null {
     // The migration payload holds every secret — log nothing from it.
 
     // Check if it's a migration URL
-    if (!url.startsWith('otpauth-migration://')) {
+    // Case-insensitive like parseQRCode, which routes here on that basis.
+    if (!/^otpauth-migration:\/\//i.test(url)) {
       console.error('Not a migration URL');
       return null;
     }

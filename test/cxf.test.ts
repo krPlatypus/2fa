@@ -113,6 +113,48 @@ export async function run(): Promise<void> {
     })
   )[0]?.period === 30);
 
+  // Records imported from files without these fields exist on disk, and
+  // `account.algorithm.toLowerCase()` turned the whole export into "Export
+  // failed" for the sake of one of them.
+  scenario('An account without algorithm, digits or period still exports');
+  let exported = '';
+  try {
+    exported = cxf.buildCxfFile([{ id: 'n1', name: 'n', issuer: 'I', secret: 'JBSWY3DPEHPK3PXP', createdAt: 1 } as any]);
+  } catch (error) {
+    exported = `threw: ${(error as Error).message}`;
+  }
+  const bareCredential = exported.startsWith('{') ? JSON.parse(exported).items[0].credentials[0] : null;
+  check('the export does not throw', bareCredential !== null, exported.slice(0, 80));
+  check('with the RFC defaults written out',
+    bareCredential?.algorithm === 'sha1' && bareCredential?.digits === 6 && bareCredential?.period === 30,
+    JSON.stringify(bareCredential && { a: bareCredential.algorithm, d: bareCredential.digits, p: bareCredential.period }));
+
+  scenario('An account with no issuer comes back with no issuer');
+  // CXF wants a title on every item, so ours writes the name there when there
+  // is no issuer. Read back as the issuer, "bob" became "bob: bob".
+  const noIssuer = cxf.readCxfFile(cxf.buildCxfFile([{ ...ACCOUNTS[0], issuer: '' }]))[0];
+  check('the issuer stays empty', noIssuer?.issuer === '', String(noIssuer?.issuer));
+  check('the name is kept', noIssuer?.name === 'alice@example.com', String(noIssuer?.name));
+  check('another vendor\'s title still stands in for a missing issuer', vendor[0]?.issuer === 'Fastmail', String(vendor[0]?.issuer));
+
+  scenario('Unusable secrets in a CXF file are counted, and a file of only those is refused');
+  const counted = cxf.readCxf(partlyBroken);
+  check('the empty and one-character secrets are counted', counted.unreadable === 2, String(counted.unreadable));
+  await resetState();
+  const EI = await import('@/components/ExportImport');
+  let refused: any = null;
+  let report: any = null;
+  try {
+    report = await EI.importBackupText(
+      JSON.stringify({ version: 1, exporter: 'x', items: [{ id: 'z', title: 'GitHub', credentials: [{ type: 'totp', secret: '1111' }] }] }),
+      () => null
+    );
+  } catch (error) {
+    refused = error;
+  }
+  check('not reported as a successful import of nothing', refused?.reason === 'nothing-readable', JSON.stringify(report));
+  check('nothing written', (await storage.getAccounts()).length === 0);
+
   scenario('A CXF file imports through the normal import path');
   await resetState();
   const result = await storage.importAccountList(cxf.readCxfFile(text));
