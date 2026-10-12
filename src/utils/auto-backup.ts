@@ -11,7 +11,7 @@ const MAX_BACKUPS = 7; // Keep last 7 backups
 // encrypted records means the backups inherit the vault's protection without a
 // second crypto path to get wrong — and without them, seven readable copies of
 // every secret would sit next to the encrypted store and defeat the point.
-interface Backup {
+export interface Backup {
   id: string;
   timestamp: number;
   accounts: StoredAccount[];
@@ -66,6 +66,41 @@ export async function saveBackup(accounts: StoredAccount[]): Promise<void> {
   } catch (error) {
     console.error('Failed to save backup:', error);
   }
+}
+
+/** A snapshot described without its records. */
+export interface BackupSummary {
+  id: string;
+  timestamp: number;
+  accountCount: number;
+  version: string;
+}
+
+/**
+ * List the snapshots without their contents.
+ *
+ * What the restore UI needs is dates and counts; the records themselves are
+ * secrets, and holding seven copies of them in React state for as long as a
+ * settings panel is open buys nothing. They are read once, by id, at the moment
+ * a restore is actually confirmed.
+ */
+export async function listBackupSummaries(): Promise<BackupSummary[]> {
+  const backups = await getAllBackups();
+  return backups.map(({ id, timestamp, accountCount, accounts, version }) => ({
+    id,
+    timestamp,
+    // The stored count, but measured from the records when it is missing or
+    // nonsense. A copy described as holding zero accounts is one the UI offers
+    // no way to restore, so getting this wrong hides a full snapshot from the
+    // person who needs it.
+    accountCount:
+      typeof accountCount === 'number' && Number.isFinite(accountCount) && accountCount >= 0
+        ? accountCount
+        : Array.isArray(accounts)
+          ? accounts.length
+          : 0,
+    version,
+  }));
 }
 
 // Get all backups
@@ -187,6 +222,17 @@ export async function wipeAllBackups(): Promise<void> {
 
 // Auto backup function - should be called periodically
 export async function autoBackup(accounts: StoredAccount[]): Promise<void> {
+  // One window at a time, and a second one simply skips. Opening the popup and
+  // the side panel together had each find yesterday's copy, each write today's,
+  // and the extra same-day copy pushed the oldest day out of the seven kept.
+  const locks = (globalThis.navigator as Navigator | undefined)?.locks;
+  if (!locks) return backupIfDue(accounts);
+  await locks.request('authenticator-auto-backup', { ifAvailable: true }, async lock => {
+    if (lock) await backupIfDue(accounts);
+  });
+}
+
+async function backupIfDue(accounts: StoredAccount[]): Promise<void> {
   try {
     const latestBackup = await getLatestBackup();
     const ONE_DAY = 24 * 60 * 60 * 1000;

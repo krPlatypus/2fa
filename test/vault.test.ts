@@ -90,7 +90,9 @@ export async function run(): Promise<void> {
 
   scenario('Recovering a forgotten password');
   await vault.lock();
-  const rotated = await vault.resetPasswordWithRecoveryCode(recoveryCode, 'third password');
+  const recovery = await vault.prepareRecovery(recoveryCode, 'third password');
+  await recovery.commit();
+  const rotated = recovery.recoveryCode;
   check('the recovery code restores access', (await storage.getAccounts()).length === 2);
   check('the recovery code is rotated', rotated !== recoveryCode);
   check('the spent recovery code is refused', await throwsNamed('WrongPasswordError', () => vault.unlockWithRecoveryCode(recoveryCode)));
@@ -159,6 +161,20 @@ export async function run(): Promise<void> {
   check('unlocked in this context', await vault.isUnlocked());
   delete areas.session.vault_session; // another surface locked it
   check('the session store wins over the local copy', !(await vault.isUnlocked()));
+
+  // Every key read refreshes the activity stamp by writing the session back,
+  // key included. A read that had fetched the session just before "Lock now"
+  // — quick fill in the service worker, while the popup's button was pressed —
+  // wrote the key straight back after the lock removed it.
+  scenario('Lock now is not undone by a key read already in flight');
+  await vault.unlockWithPassword(PASSWORD);
+  const inFlight = vault.getMasterKeyBytes();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.all([inFlight, vault.lock()]);
+  await flush();
+  check('the key is gone from the session', !areas.session.vault_session);
+  check('and the vault reads as locked', !(await vault.isUnlocked()));
 
   scenario('An account added elsewhere reaches an open list');
   check('a write to the primary copy is a reason to reload',

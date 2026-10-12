@@ -118,9 +118,13 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
     // Parse the path: can be "Issuer:Account" or just "Account". Everything
     // after the FIRST colon is the account — splitting on every colon dropped
     // the tail of labels like "Acme:a:b@example.com", silently storing "a".
-    const path = decodeURIComponent(urlObj.pathname.replace(/^\//, ''));
+    const path = decodeLabel(urlObj.pathname.replace(/^\//, ''));
     const separator = path.indexOf(':');
-    const issuer = params.get('issuer') || (separator >= 0 ? path.slice(0, separator) : 'Unknown');
+    // No issuer is left empty, not filled in as "Unknown". The .txt export
+    // omits `issuer=` for an account that has none, so inventing one here made
+    // every such account come back from its own backup renamed — and the edit
+    // form had to special-case the invented word to hide it.
+    const issuer = params.get('issuer') || (separator >= 0 ? path.slice(0, separator) : '');
     // Google writes "Issuer: Account" with a space after the colon.
     const name = (separator >= 0 ? path.slice(separator + 1) : path || 'Account').trim();
 
@@ -201,9 +205,14 @@ export function buildOTPAuthURL(account: ParsedOTPAuth): string {
   if (issuer) params.set('issuer', issuer);
   // Written out even at their defaults: an importer that assumes different ones
   // produces a confidently wrong code, which is the failure with no symptom.
-  params.set('algorithm', account.algorithm);
-  params.set('digits', String(account.digits));
-  params.set('period', String(account.period));
+  //
+  // Repaired the way generation repairs them. A record imported from a file
+  // that lacked these fields has none, and the export wrote
+  // `algorithm=undefined&digits=undefined&period=undefined` — which other apps
+  // refuse, and which reads back here as defaults only by luck.
+  params.set('algorithm', parseAlgorithm(account.algorithm ?? null));
+  params.set('digits', String(parseDigits(account.digits == null ? null : String(account.digits))));
+  params.set('period', String(parsePeriod(account.period == null ? null : String(account.period))));
 
   // URLSearchParams spells a space `+`, which is form encoding rather than RFC
   // 3986. Readers that follow the RFC take it literally and import an issuer
@@ -329,4 +338,17 @@ export function colorForKey(key: string): string {
     hash = (hash * 31 + key.charCodeAt(i)) | 0;
   }
   return ACCOUNT_COLORS[Math.abs(hash) % ACCOUNT_COLORS.length];
+}
+
+/**
+ * A label is display text, not something to reject a code over. A bare `%` —
+ * "50%off:bob" — makes decodeURIComponent throw, and that took the whole QR
+ * down as invalid, secret and all.
+ */
+function decodeLabel(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }

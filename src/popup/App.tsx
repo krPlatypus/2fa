@@ -1,11 +1,11 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useCallback, useState, useMemo, useRef, useEffect } from 'react';
 import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles, ArrowLeft } from 'lucide-react';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useVault } from '@/hooks/useVault';
 import { AccountCard, type ViewMode } from '@/components/AccountCard';
 import { SearchBar } from '@/components/SearchBar';
 import { AddAccountModal } from '@/components/AddAccountModal';
-import { ExportImport, importBackupText, importResultMessage } from '@/components/ExportImport';
+import { ExportImport, importBackupText, importResultKind, importResultMessage } from '@/components/ExportImport';
 import { importURIList, looksLikeURIList } from '@/utils/uri-import';
 import { accountLabel } from '@/utils/account-label';
 import { EditAccountModal } from '@/components/EditAccountModal';
@@ -24,26 +24,34 @@ import { VaultSettings } from '@/components/VaultSettings';
 import { VaultSetupModal } from '@/components/VaultSetupModal';
 import { EmptyStateGuide } from '@/components/EmptyStateGuide';
 import { AccountsUnavailable } from '@/components/AccountsUnavailable';
+import { RestoreBackups, RestoreOffer } from '@/components/RestoreBackups';
 import { GroupFilter } from '@/components/GroupFilter';
 import { SupportFooter } from '@/components/SupportFooter';
 import { getTimeSyncNotice, dismissTimeNotice, getClockStatus, recheckClock, type ClockStatus } from '@/utils/time-sync';
-import { applyDocumentLanguage, createT, detectLanguage, loadLanguage, type Language } from '@/utils/i18n';
+import { applyDocumentLanguage, createT, loadLanguage, resolveLanguage, type Language } from '@/utils/i18n';
+import { settingsFromChanges } from '@/utils/settings-watch';
+import { chooseListView, matchesSearch } from '@/utils/list-view';
 import { addMultipleAccounts, getAccounts } from '@/utils/storage';
+import { listBackupSummaries, type BackupSummary } from '@/utils/auto-backup';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
-import { describeImport } from '@/utils/import-message';
+import { describeImport, importErrorMessage } from '@/utils/import-message';
 import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 import { FeedbackHost } from '@/components/FeedbackHost';
 import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
+import { clearUpdateBadge } from '@/utils/update-badge';
+import { productHuntDue } from '@/utils/product-hunt';
+import { ProductHuntBanner } from '@/components/ProductHuntBanner';
 import { readActiveGroup, rememberActiveGroup, forgetActiveGroup } from '@/utils/active-group';
 import { helpUrl } from '@/utils/links';
 import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { saveErrorMessage } from '@/utils/save-error';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
 import { forgetAccountIcons, getCustomIcons, setAccountIcon, setGroupColor, setGroupIcon, type IconStore } from '@/utils/custom-icons';
-import { isQuickFillEnabled, peekPickPrompt, publishQuickFillStrings, setQuickFillEnabled } from '@/utils/quick-fill';
+import { isQuickFillEnabled, peekPickPrompt, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
 import {
@@ -140,6 +148,10 @@ function App() {
   const [quickFillOn, setQuickFillOn] = useState(true);
   const [syncOn, setSyncOn] = useState(true);
   const [syncOverflow, setSyncOverflow] = useState(false);
+  // The automatic snapshots, described without their records. Read once here
+  // rather than in each place that offers a restore, so the offer on the empty
+  // list and the list in Settings can never disagree about what exists.
+  const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   // Off unless asked for. The list is the one screen every user of this
   // extension already knows by heart, and a coloured circle appearing beside
@@ -159,8 +171,11 @@ function App() {
   const [showPromoBanner, setShowPromoBanner] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [openCount, setOpenCount] = useState<number | null>(null);
+  const [showProductHunt, setShowProductHunt] = useState(false);
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
   const draggedIdRef = useRef<string | null>(null);
+  /** The last account reported gone, so the save path and the effect below do not both say it. */
+  const goneAccountRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -171,18 +186,11 @@ function App() {
       // Without one, follow the browser: twenty translated interfaces were
       // reachable only from a dropdown, so every install began in English no
       // matter who installed it.
-      const language: Language = result.language || detectLanguage();
+      const language: Language = resolveLanguage(result.language);
       if (language !== 'en') {
         // Switch only once the chunk is in memory, otherwise the first paint
         // would be English and then visibly flip.
-        loadLanguage(language).then(() => {
-          setLanguage(language);
-          // Also on a plain open, not only when the language is changed: an
-          // install that has never touched the picker has published nothing,
-          // and an update that retranslates a string would otherwise leave the
-          // worker holding the old one forever.
-          void publishQuickFillStrings(language);
-        });
+        loadLanguage(language).then(() => setLanguage(language));
       }
       if (result.darkMode) {
         setDarkMode(true);
@@ -236,11 +244,77 @@ function App() {
     getOpenMode().then(setOpenModeState);
   }, []);
 
+  // Every setting on this screen, followed as it changes in another open copy
+  // of the app — see settings-watch.ts for what went wrong without it.
+  useEffect(() => {
+    if (!chrome.storage?.onChanged?.addListener) return;
+    const onChanged = (changes: Record<string, { newValue?: unknown }>, areaName: string) => {
+      const patch = settingsFromChanges(changes, areaName);
+      const nextLanguage = patch.language;
+      if (nextLanguage) loadLanguage(nextLanguage).then(() => setLanguage(nextLanguage));
+      if (patch.darkMode !== undefined) setDarkMode(patch.darkMode);
+      if (patch.viewMode) setViewMode(patch.viewMode);
+      if (patch.showAvatars !== undefined) setShowAvatars(patch.showAvatars);
+      if (patch.popupSize) {
+        setPopupSize(patch.popupSize);
+        rememberPopupSize(patch.popupSize);
+      }
+      if (patch.openMode) setOpenModeState(patch.openMode);
+      if (patch.syncEnabled !== undefined) setSyncOn(patch.syncEnabled);
+      if (patch.syncOverflow !== undefined) setSyncOverflow(patch.syncOverflow);
+      if (patch.quickFill !== undefined) setQuickFillOn(patch.quickFill);
+      if (patch.suggestions !== undefined) {
+        setSuggestionsOn(patch.suggestions);
+        if (!patch.suggestions) setSuggestedAccountId(null);
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
+
+  /**
+   * Turning sync on is an upload, and an upload can fail.
+   *
+   * This used to say "Saved" unconditionally. setSyncEnabled swallows a failed
+   * push, the overflow flag that records one was read only when the popup
+   * opened, and a rejected vault-metadata write escaped as an unhandled
+   * rejection — so the switch showed on, the toast said saved, and nothing had
+   * reached Google. The switch and the warning under it are now re-read from
+   * the store afterwards, and the toast says what actually happened.
+   *
+   * `result === false` is for a setSyncEnabled that reports a failed push
+   * itself; today's resolves to nothing and leaves the overflow flag as the
+   * only record, which is read here either way.
+   */
   const handleSyncToggle = async () => {
     const next = !syncOn;
     setSyncOn(next);
-    await setSyncEnabled(next);
-    toast('success', t('vault.settings.saved'));
+    let failed = false;
+    try {
+      const result: unknown = await setSyncEnabled(next);
+      failed = result === false;
+    } catch (error) {
+      console.error('Could not change the sync setting:', error);
+      failed = true;
+    }
+
+    let overflowed = false;
+    try {
+      const [on, overflow] = await Promise.all([isSyncEnabled(), hasSyncOverflowed()]);
+      setSyncOn(on);
+      setSyncOverflow(overflow);
+      overflowed = on && overflow;
+    } catch {
+      // The switch keeps the state it was just given; the toast still reports.
+    }
+
+    if (next && (failed || overflowed)) {
+      toast('error', t('settings.syncFailed'));
+    } else if (failed) {
+      toast('error', t('accounts.updateFailed'));
+    } else {
+      toast('success', t('vault.settings.saved'));
+    }
   };
 
   // The service worker watches this key and adds or removes the menu item
@@ -266,8 +340,45 @@ function App() {
     if (accounts.length === 0 && searchQuery) setSearchQuery('');
   }, [accounts.length, searchQuery]);
 
+  /**
+   * Read the snapshot list, and re-read it after a restore.
+   *
+   * Not gated on the account list being empty: the same summaries are what
+   * Settings lists at any time, and a read of seven index entries costs
+   * nothing next to opening the popup.
+   */
+  const loadBackups = useCallback(() => {
+    listBackupSummaries()
+      .then(setBackups)
+      .catch(error => console.warn('Could not list the automatic copies:', error));
+  }, []);
+
+  useEffect(loadBackups, [loadBackups]);
+
+  /** After a restore: the list, the snapshot counts, and the reminder state. */
+  const handleRestored = useCallback(() => {
+    reload();
+    loadBackups();
+  }, [reload, loadBackups]);
+
+  /**
+   * The newest snapshot that holds anything, or null.
+   *
+   * This is the whole condition for offering a restore where an empty list is:
+   * a first run has no snapshots, so a new user is never told they might have
+   * lost something, and someone whose list emptied out is never told they are
+   * new.
+   */
+  const recoverable = useMemo(
+    () => backups.find(backup => backup.accountCount > 0) ?? null,
+    [backups]
+  );
+
   // Show the "What's New" modal once after an update, if we have copy for it
   useEffect(() => {
+    // The dot on the toolbar icon only asked for this open. The modal stays
+    // armed until it is closed; the dot does not need to.
+    clearUpdateBadge().catch(() => {});
     chrome.storage.local.get('pendingWhatsNew', (result) => {
       const version = result.pendingWhatsNew;
       if (version && WHATS_NEW[version]) {
@@ -288,10 +399,6 @@ function App() {
     await loadLanguage(lang);
     setLanguage(lang);
     chrome.storage.local.set({ language: lang });
-    // The service worker draws the right-click menu item and cannot read a
-    // translation table of its own — see utils/quick-fill.ts. This is where it
-    // gets the words.
-    void publishQuickFillStrings(lang);
   };
 
   /**
@@ -365,16 +472,7 @@ function App() {
     }
 
     if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      // The label is searched alongside the two fields, not instead of them: it
-      // hides the issuer from the row, and someone who remembers the issuer
-      // should still find the account by it.
-      list = list.filter(
-        (acc) =>
-          acc.name.toLowerCase().includes(query) ||
-          acc.issuer.toLowerCase().includes(query) ||
-          (acc.label ?? '').toLowerCase().includes(query)
-      );
+      list = list.filter(acc => matchesSearch(acc, searchQuery));
     }
 
     return list;
@@ -383,6 +481,14 @@ function App() {
   // A filter is a claim about the whole list, so the pinned suggestion — which
   // ignores it — is dropped while one is active, the same as during a search.
   const isFiltered = Boolean(searchQuery) || activeGroup !== null;
+
+  const listView = chooseListView({
+    loading,
+    total: accounts.length,
+    shown: filteredAccounts.length,
+    failed: Boolean(error),
+    held: heldCount,
+  });
 
   // Pinning a duplicate on top only pays off when the list is long enough to
   // scroll; with few accounts the badge highlight in the list is enough.
@@ -447,10 +553,11 @@ function App() {
 
   const handleAddAccount = async (
     account: Account | Account[],
-    batch?: { index: number; total: number }
+    batch?: { index: number; total: number },
+    unsupported = 0
   ) => {
     if (Array.isArray(account)) {
-      const result = await addMultipleAccounts(account);
+      const result = { ...(await addMultipleAccounts(account)), unsupported };
       reload();
       revealAccount(account[0]);
       // One batch carries one group, so the first entry speaks for all of them.
@@ -465,7 +572,13 @@ function App() {
         describeImport(result, language, account[0]?.group) + more
       );
     } else {
-      await addAccount(account);
+      // A seed already in the list is skipped, and saying "Account added" over
+      // a list that did not change sends the user looking for a row that is
+      // not there.
+      if (!(await addAccount(account))) {
+        toast('info', t('accounts.alreadyExists'));
+        return;
+      }
       revealAccount(account);
       toast('success', account.group ? t('accounts.addedToGroup', account.group) : t('accounts.added'));
     }
@@ -483,14 +596,35 @@ function App() {
       danger: true,
     });
 
-    if (confirmed) {
+    if (!confirmed) return;
+    try {
       await deleteAccount(id);
       toast('success', t('accounts.deleted'));
+    } catch (error) {
+      // Silence here read as a delete that worked and an account that came back.
+      console.error('Could not delete the account:', error);
+      toast('error', t('accounts.deleteFailed'));
     }
   };
 
   const handleEditAccount = async (id: string, updates: Partial<Account>) => {
-    await updateAccount(id, updates);
+    let found: boolean | void;
+    try {
+      found = await updateAccount(id, updates);
+    } catch (error) {
+      console.error('Could not save the changes:', error);
+      toast('error', t('accounts.updateFailed'));
+      // Rethrown so the edit form stays open with what was typed.
+      throw error;
+    }
+    // Deleted in another window while this one had it open. "Changes saved"
+    // over a row that is not in the list sends the user looking for it; the
+    // modal closes itself once onSave resolves.
+    if (found === false) {
+      if (goneAccountRef.current !== id) toast('info', t('accounts.notFound'));
+      goneAccountRef.current = id;
+      return;
+    }
     // Only when the group was actually touched: an edit that leaves it alone
     // cannot have moved the account out of the current filter.
     if ('group' in updates) revealAccount(updates);
@@ -501,22 +635,35 @@ function App() {
     draggedIdRef.current = id;
   };
 
+  /** Whichever way a drag ends — a drop, a drop outside the list, Esc. */
+  const handleDragEnd = () => {
+    draggedIdRef.current = null;
+    setDragOverId(null);
+  };
+
   const handleDrop = async (_e: React.DragEvent, targetId: string) => {
     const draggedId = draggedIdRef.current;
-    if (!draggedId || draggedId === targetId) {
-      setDragOverId(null);
-      return;
-    }
+    // Cleared before the write rather than after it: the write can take a
+    // moment, and it can fail — either way the marker must not outlive the drop.
+    handleDragEnd();
+    if (!draggedId || draggedId === targetId) return;
 
     const newOrder = [...accounts.map(a => a.id)];
     const fromIndex = newOrder.indexOf(draggedId);
     const toIndex = newOrder.indexOf(targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
     newOrder.splice(fromIndex, 1);
     newOrder.splice(toIndex, 0, draggedId);
 
-    await reorderAccounts(newOrder);
-    draggedIdRef.current = null;
-    setDragOverId(null);
+    try {
+      await reorderAccounts(newOrder);
+    } catch (error) {
+      // Unreported, a refused write left the rows where the user dropped them
+      // until the next reload put them back — an order that quietly undid itself.
+      console.error('Could not save the new order:', error);
+      toast('error', t('accounts.reorderFailed'));
+      reload();
+    }
   };
 
   const handleImportClick = () => {
@@ -560,69 +707,80 @@ function App() {
           // Entries that could no longer be read are named rather than rounded
           // up to "successful" — a restore that quietly dropped rows is the one
           // case where the user needs to go looking for another copy.
-          toast(
-            imported.unreadable > 0 ? 'info' : 'success',
-            importResultMessage(imported, language)
-          );
+          toast(importResultKind(imported), importResultMessage(imported, language));
         }
       }
     } catch (error) {
       console.error('Import failed:', error);
-      toast(
-        'error',
-        error instanceof Error && error.name === 'WrongExportPasswordError'
-          ? t('import.wrongPassword')
-          : t('import.failed')
-      );
+      // The same wording as Settings → Import: an encrypted Aegis or 2FAS
+      // export, or an Alibaba Cloud backup, each needs its own next step.
+      toast('error', importErrorMessage(error, language));
     }
 
     e.target.value = '';
   };
 
   const handleQRImport = async (file: File) => {
+    let text: string | null;
     try {
-      const result = await decodeQrFromImage(file);
-      if (!result) {
-        throw new Error(t('addAccount.errorNoQr'));
-      }
+      text = await decodeQrFromImage(file);
+    } catch (error) {
+      // createImageBitmap rejects a file it cannot open — a HEIC photo, a
+      // truncated download — with a DOMException written for the console, and
+      // that sentence used to be the toast: "The source image could not be
+      // decoded.", in English, whatever language the popup was in.
+      console.error('Could not open the image:', error);
+      toast('error', t('import.imageUnreadable'));
+      return;
+    }
+    if (!text) {
+      toast('error', t('addAccount.errorNoQr'));
+      return;
+    }
 
-      const parsed = parseQRCode(result);
-      if (parsed) {
-        const accountsToAdd: Account[] = parsed.accounts.map((accountData, index) => ({
-          id: Date.now().toString() + index + Math.random().toString(36).substring(7),
-          name: accountData.name,
-          issuer: accountData.issuer,
-          secret: cleanSecret(accountData.secret),
-          algorithm: accountData.algorithm,
-          digits: accountData.digits,
-          period: accountData.period,
-          createdAt: Date.now() + index,
-          color: generateRandomColor(),
-        }));
-
-        const result = await addMultipleAccounts(accountsToAdd);
-        reload();
-        // A split Google Authenticator export is the common case for anyone with
-        // more than ten accounts, and stopping after the first code is the
-        // default mistake. Say which code this was.
-        const more = parsed.batch && parsed.batch.index < parsed.batch.total
-          ? ` ${t('import.qrBatch', parsed.batch.index, parsed.batch.total)}`
-          : '';
-        toast(result.added > 0 ? 'success' : 'info', describeImport(result, language) + more);
-      } else {
-        throw new Error(t('addAccount.errorInvalidQR'));
-      }
+    let parsed;
+    try {
+      parsed = parseQRCode(text);
     } catch (error) {
       console.error('QR import failed:', error);
-      if (error instanceof UnsupportedOTPTypeError) {
-        // Understood, and refused on purpose — saying "invalid QR" here would
-        // send the user off to re-export a code that can never work.
-        toast('error', t('addAccount.errorHotp'));
-        return;
-      }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      toast('error', t('import.qrFailed', errorMessage));
+      // Understood, and refused on purpose — saying "invalid QR" here would
+      // send the user off to re-export a code that can never work.
+      toast('error', t(error instanceof UnsupportedOTPTypeError ? 'addAccount.errorHotp' : 'addAccount.errorInvalidQR'));
+      return;
     }
+    if (!parsed) {
+      toast('error', t('addAccount.errorInvalidQR'));
+      return;
+    }
+
+    const accountsToAdd: Account[] = parsed.accounts.map((accountData, index) => ({
+      id: Date.now().toString() + index + Math.random().toString(36).substring(7),
+      name: accountData.name,
+      issuer: accountData.issuer,
+      secret: cleanSecret(accountData.secret),
+      algorithm: accountData.algorithm,
+      digits: accountData.digits,
+      period: accountData.period,
+      createdAt: Date.now() + index,
+      color: generateRandomColor(),
+    }));
+
+    let result;
+    try {
+      result = { ...(await addMultipleAccounts(accountsToAdd)), unsupported: parsed.skipped ?? 0 };
+    } catch (error) {
+      console.error('Could not save the scanned accounts:', error);
+      toast('error', saveErrorMessage(error, t));
+      return;
+    }
+    reload();
+    // A split Google Authenticator export is the common case for anyone with
+    // more than ten accounts, and stopping after the first code is the
+    // default mistake. Say which code this was.
+    const more = parsed.batch && parsed.batch.index < parsed.batch.total
+      ? ` ${t('import.qrBatch', parsed.batch.index, parsed.batch.total)}`
+      : '';
+    toast(result.added > 0 ? 'success' : 'info', describeImport(result, language) + more);
   };
 
   // Anything that covers the whole app. Two things depend on knowing: the
@@ -644,6 +802,30 @@ function App() {
       setSharingAccount(null);
     }
   }, [vault.enabled, vault.locked]);
+
+  // The same two views, when their account is deleted in another window. Left
+  // open, Edit saved into nothing and said "Changes saved", and Share kept
+  // handing out codes for an account the user had just removed.
+  //
+  // Only against a list that was really read: while loading, behind a lock, or
+  // after a failed read the list is empty for reasons that say nothing about
+  // this account.
+  useEffect(() => {
+    if (loading || error || vaultHidingAccounts) return;
+    const gone = (account: Account | null) =>
+      account !== null && !accounts.some(existing => existing.id === account.id);
+    const goneEditing = gone(editingAccount);
+    const goneSharing = gone(sharingAccount);
+    if (!goneEditing && !goneSharing) return;
+
+    const id = (goneEditing ? editingAccount : sharingAccount)!.id;
+    if (goneEditing) setEditingAccount(null);
+    if (goneSharing) setSharingAccount(null);
+    if (goneAccountRef.current !== id) toast('info', t('accounts.notFound'));
+    goneAccountRef.current = id;
+    // `t` is rebuilt every render; the language changing is no reason to re-check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, loading, error, vaultHidingAccounts, editingAccount, sharingAccount]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -675,6 +857,37 @@ function App() {
   useEffect(() => {
     if (loading || openCount === null) return;
     shouldShowReviewPrompt(openCount, accounts.length).then(setShowReviewPrompt);
+  }, [loading, openCount, accounts.length]);
+
+  // The Product Hunt banner — see product-hunt.ts for when and why. Same
+  // readiness as the review ask above: while loading, and behind a locked
+  // vault, the list is empty and says nothing about the person holding it.
+  //
+  // Asked again every minute and whenever the page comes back into view, not
+  // only when the account count changes: a side panel or a floating window
+  // stays open for days, and one opened during the launch kept announcing it
+  // long after the day was over — and after it was dismissed in another window.
+  useEffect(() => {
+    if (loading || openCount === null || accounts.length === 0) return;
+    let cancelled = false;
+    const check = () => {
+      productHuntDue()
+        .then(due => {
+          if (!cancelled) setShowProductHunt(due);
+        })
+        .catch(() => {});
+    };
+    check();
+    const timer = window.setInterval(check, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [loading, openCount, accounts.length]);
 
   const handleSnoozeReview = async () => {
@@ -714,11 +927,22 @@ function App() {
   // protecting — see vault-prompt.ts for the reasoning behind the timing.
   useEffect(() => {
     if (loading || vault.enabled === null) return;
-    shouldShowVaultPrompt(accounts.length, vault.enabled).then(show => {
-      setShowVaultPrompt(show);
-      if (show) markVaultPromptShown();
-    });
+    shouldShowVaultPrompt(accounts.length, vault.enabled).then(setShowVaultPrompt);
   }, [loading, accounts.length, vault.enabled]);
+
+  // The vault offer is the notice up top that gives way to all the others — an
+  // error, the clock warning, the backup reminder, the Product Hunt banner — so
+  // its three showings are counted when it is on screen, not when it is due.
+  // Counted when due, someone with a backup reminder up on every open spent all
+  // three without once seeing the offer.
+  const vaultPromptVisible =
+    showVaultPrompt && !showBackupReminder && !showProductHunt && !error && timeOffsetSec === null && !showSettings;
+  const vaultPromptCounted = useRef(false);
+  useEffect(() => {
+    if (!vaultPromptVisible || vaultPromptCounted.current) return;
+    vaultPromptCounted.current = true;
+    markVaultPromptShown();
+  }, [vaultPromptVisible]);
 
   // Cross-promo banner — only for users active for at least a week
   useEffect(() => {
@@ -976,7 +1200,7 @@ function App() {
         <div className="bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 p-3 flex items-start gap-2">
           <AlertTriangle className="text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" size={16} />
           <div className="text-xs text-red-800 dark:text-red-300 flex-1">
-            {error}
+            {t(error)}
           </div>
         </div>
       )}
@@ -1023,10 +1247,20 @@ function App() {
         </div>
       )}
 
+      {/* The Product Hunt launch, for the day it lasts. Above the codes rather
+          than in a modal: someone opening this mid-login is not stopped, and the
+          ask is still the first thing they see. For that one day it outranks the
+          backup reminder and the vault offer, which are back the day after, and
+          it gives way to an error and the clock warning — those are about the
+          codes being wrong. */}
+      {showProductHunt && !error && timeOffsetSec === null && !showSettings && (
+        <ProductHuntBanner language={language} onDismiss={() => setShowProductHunt(false)} />
+      )}
+
       {/* Backup Reminder */}
       {/* Not over Settings: its own Export button is on that screen, four lines
           below, and the strip's button only opens the screen you are on. */}
-      {showBackupReminder && !error && timeOffsetSec === null && !showSettings && (
+      {showBackupReminder && !showProductHunt && !error && timeOffsetSec === null && !showSettings && (
         <BackupReminder
           language={language}
           onExport={handleBackupFromReminder}
@@ -1035,7 +1269,7 @@ function App() {
       )}
 
       {/* Offer password protection — never at the same time as another notice */}
-      {showVaultPrompt && !showBackupReminder && !error && timeOffsetSec === null && !showSettings && (
+      {vaultPromptVisible && (
         <VaultPrompt
           language={language}
           onEnable={() => {
@@ -1054,6 +1288,10 @@ function App() {
           <div className="flex-1 overflow-y-auto p-4">
           <h3 className="text-gray-900 dark:text-gray-100 font-medium mb-3 text-sm">{t('settings.backupRestore')}</h3>
           <ExportImport onImportComplete={reload} onExportComplete={() => setShowBackupReminder(false)} language={language} />
+
+          {/* Always here, whatever state the list is in: the copies are most
+              useful to someone who knew about them before they needed them. */}
+          <RestoreBackups backups={backups} language={language} onRestored={handleRestored} />
 
           <SettingToggle
             label={t('settings.sync')}
@@ -1265,16 +1503,15 @@ function App() {
       {/* Accounts List */}
       {!showSettings && (
       <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-dark-900">
-        {loading ? (
+        {listView === 'loading' ? (
           <div className="flex items-center justify-center h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 dark:border-dark-600 border-t-gray-900 dark:border-t-gray-300"></div>
           </div>
-        ) : filteredAccounts.length === 0 ? (
-          // `accounts.length > 0` has to win: with no accounts at all the answer
-          // is the setup guide, whatever the filter says. Otherwise someone who
-          // deletes their last account while filtered gets "no results" and no
-          // way to add anything.
-          error || heldCount > 0 ? (
+        ) : listView !== 'list' ? (
+          // The order lives in chooseListView: accounts on screen outrank the
+          // explanations of why there might be none, and with no accounts at
+          // all the setup guide wins whatever the filter says.
+          listView === 'unavailable' ? (
             // Not a new user: the records are on disk, they just cannot be read
             // right now. Showing the setup guide here was the app saying "you
             // have no accounts" to someone whose accounts are intact.
@@ -1284,8 +1521,18 @@ function App() {
               language={language}
               onRetry={reload}
               onImport={handleImportClick}
+              restore={
+                recoverable && (
+                  <RestoreOffer
+                    backup={recoverable}
+                    language={language}
+                    onRestored={handleRestored}
+                    variant="inline"
+                  />
+                )
+              }
             />
-          ) : isFiltered && accounts.length > 0 ? (
+          ) : listView === 'noResults' ? (
             <div className="flex flex-col items-center justify-center h-[340px] text-center p-6">
               <Logo size={48} className="mb-3 opacity-30" />
               <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">
@@ -1308,14 +1555,25 @@ function App() {
               </button>
             </div>
           ) : (
-            <EmptyStateGuide
-              language={language}
-              onAddAccount={() => setShowAddModal(true)}
-              onImport={handleImportClick}
-              onScanWithCamera={() =>
-                chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })
-              }
-            />
+            <>
+              {/* Only when a snapshot actually holds accounts — otherwise this
+                  is a first run and the guide below is the whole answer. */}
+              {recoverable && (
+                <RestoreOffer
+                  backup={recoverable}
+                  language={language}
+                  onRestored={handleRestored}
+                />
+              )}
+              <EmptyStateGuide
+                language={language}
+                onAddAccount={() => setShowAddModal(true)}
+                onImport={handleImportClick}
+                onScanWithCamera={() =>
+                  chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })
+                }
+              />
+            </>
           )
         ) : (
           <div className="bg-white dark:bg-dark-800 pb-20">
@@ -1384,6 +1642,8 @@ function App() {
                 onDragStart={handleDragStart}
                 onDragOver={() => setDragOverId(account.id)}
                 onDrop={handleDrop}
+                onDragLeave={id => setDragOverId(current => (current === id ? null : current))}
+                onDragEnd={handleDragEnd}
                 isDragOver={dragOverId === account.id}
                 currentDomain={currentDomain}
                 // Matches the condition that decides the pinned card above, so
@@ -1402,7 +1662,7 @@ function App() {
                 pitch, so the card behind it is the identical ask twice on one
                 screen — and on the 1.11.0 rollout that modal opens for everyone
                 at once. */}
-            {!isFiltered && whatsNewVersion === null &&
+            {!isFiltered && whatsNewVersion === null && !showProductHunt &&
               (showReviewPrompt ? (
                 <ReviewPrompt language={language} onRate={handleRate} onSnooze={handleSnoozeReview} />
               ) : showPromoBanner ? (
@@ -1453,6 +1713,7 @@ function App() {
           groups={groups.map(group => group.name)}
           iconUrl={customIcons.accounts[editingAccount.id]}
           onIconChange={(dataUrl) => handleIconChange(editingAccount.id, dataUrl)}
+          accounts={accounts}
         />
       )}
 

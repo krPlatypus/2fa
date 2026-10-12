@@ -165,6 +165,11 @@ type TranslationKeys = {
   'review.rateStars': string;
   'review.later': string;
 
+  // Product Hunt launch banner
+  'productHunt.body': string;
+  'productHunt.visit': string;
+  'productHunt.notNow': string;
+
   // Theme
   'theme.toggle': string;
 
@@ -354,6 +359,16 @@ type VaultTranslationKeys = {
   'accounts.addedToGroup': string;
   'accounts.updated': string;
   'accounts.deleted': string;
+  'accounts.alreadyExists': string;
+  'accounts.updateFailed': string;
+  'accounts.deleteFailed': string;
+  'import.qrSkipped': string;
+  'load.recovering': string;
+  'load.fromBackup': string;
+  'load.failed': string;
+  'scan.saveFailedTitle': string;
+  'scan.refusedTitle': string;
+  'scan.errorBody': string;
   'export.plainConfirmTitle': string;
   'addAccount.scanWithCamera': string;
   'scan.title': string;
@@ -402,8 +417,61 @@ type VaultTranslationKeys = {
   'share.caution': string;
   'share.failed': string;
   'share.done': string;
+  // Restoring from the automatic daily snapshots
+  'restore.title': string;
+  'restore.hint': string;
+  'restore.none': string;
+  'restore.older': string;
+  /** "{0} account(s)" — what one snapshot holds */
+  'restore.count': string;
+  'restore.ageToday': string;
+  /** "{0} day(s) ago" */
+  'restore.ageDays': string;
+  'restore.ageUnknown': string;
+  'restore.action': string;
+  'restore.busy': string;
+  'restore.done': string;
+  'restore.nothingNew': string;
+  'restore.held': string;
+  'restore.failed': string;
+  'restore.gone': string;
+  'restore.locked': string;
+  'restore.confirmTitle': string;
+  /** "{0}" — how long ago the snapshot was taken */
+  'restore.confirmBody': string;
+  'restore.offerTitle': string;
+  'restore.offerBody': string;
+  'restore.offerAction': string;
   'update.feature.shareCodes': string;
   'update.feature.openIn': string;
+  'update.feature.restoreBackups': string;
+  'edit.secretHint': string;
+  'edit.secretDuplicate': string;
+  'accounts.notFound': string;
+  'accounts.reorderFailed': string;
+  'settings.syncFailed': string;
+  'import.imageUnreadable': string;
+  'crash.title': string;
+  'crash.body': string;
+  'crash.reload': string;
+  'crash.saveCopy': string;
+  /** "Camera {0}" — a camera the browser reports without a name */
+  'scan.cameraN': string;
+  'recovery.saveCopyFailed': string;
+  /** "{0} account(s) added." — a file or a pasted list, never a QR */
+  'import.fileAdded': string;
+  /** "{0}" accounts in the file the list already held */
+  'import.fileAlreadyHere': string;
+  'import.fileEmpty': string;
+  /** "{0}" entries with no usable secret */
+  'import.fileUnreadable': string;
+  /** "{0}" entries of a code type we refuse: HOTP, Steam */
+  'import.fileUnsupported': string;
+  'import.unknownFormat': string;
+  'import.nothingReadable': string;
+  'import.onlyUnsupported': string;
+  /** "{0}" — the app that encrypted the file: Aegis, 2FAS, Bitwarden */
+  'import.encryptedElsewhere': string;
 };
 
 /** A complete set of strings for one language. */

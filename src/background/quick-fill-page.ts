@@ -74,6 +74,17 @@ export async function quickFillInPage(args: QuickFillPageArgs): Promise<QuickFil
     return el;
   };
 
+  // `hasFocus()` is true for every document on the path down to the caret, not
+  // just the one holding it: with the caret in an iframe's code field, the top
+  // page said "mine" too, found no field of its own, and put the code on the
+  // clipboard with a "copied" toast — and, answering first, its outcome was the
+  // one reported. What the page has focused says which: a frame element means
+  // the caret is further down, and that frame answers for itself.
+  if (args.requireFocus) {
+    const holder = focusedElement();
+    if (holder && (holder.tagName === 'IFRAME' || holder.tagName === 'FRAME')) return 'skipped';
+  }
+
   const OTP_HINT = /(^|[^a-z])(otp|totp|mfa|2fa|twofactor|two_factor|onetime|one_time|authcode|securitycode|verification|verify|passcode|token)([^a-z]|$)/i;
 
   /**

@@ -19,7 +19,10 @@ const suites = [
   ['quick fill in the page', () => import('./quick-fill-page.test')],
   ['groups', () => import('./groups.test')],
   ['recovery', () => import('./recovery.test')],
+  ['restoring an automatic copy', () => import('./restore.test')],
   ['review prompt', () => import('./review-prompt.test')],
+  ['backup reminder', () => import('./backup-reminder.test')],
+  ['product hunt launch', () => import('./product-hunt.test')],
   ['time sync', () => import('./time-sync.test')],
   ['wrong clocks', () => import('./clock.test')],
   ['upgrade from 1.11.0', () => import('./upgrade.test')],
@@ -33,6 +36,7 @@ const suites = [
   ['sharing codes by link', () => import('./share.test')],
   ['where the app opens', () => import('./open-mode.test')],
   ['language detection', () => import('./i18n.test')],
+  ['what the popup puts on screen', () => import('./ui-state.test')],
   ['the store listing against the manifest', () => import('./listing.test')],
 ] as const;
 

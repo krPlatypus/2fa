@@ -10,7 +10,7 @@
 import { generateRandomColor, parseQRCode, UnsupportedOTPTypeError, type ParsedOTPAuth } from './qr-parser';
 import { cleanSecret } from './totp';
 import { addMultipleAccounts, VaultLockedError } from './storage';
-import { describeImport } from './import-message';
+import { describeFileImport } from './import-message';
 import { createT, type Language } from './i18n';
 import type { Account } from '@/types';
 
@@ -176,7 +176,9 @@ export async function importURIList(text: string, language: Language): Promise<U
     const result = await addMultipleAccounts(accounts);
     return {
       kind: result.added > 0 && notes.length === 0 ? 'success' : 'info',
-      message: [describeImport(result, language), ...notes].join(' '),
+      // Not describeImport: that says "from QR code", and these came from a
+      // paste or a .txt.
+      message: [describeFileImport({ added: result.added, alreadyHere: result.skipped }, language), ...notes].join(' '),
       added: result.added,
     };
   } catch (error) {

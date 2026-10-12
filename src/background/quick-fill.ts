@@ -12,11 +12,20 @@ import { getAccounts } from '@/utils/storage';
 import { VaultLockedError } from '@/utils/vault';
 import { getFillCandidate, hostnameOf, recordAccountUsage } from '@/utils/suggestions';
 import { loadTimeOffset, tryGenerateTOTP } from '@/utils/totp';
-import { isQuickFillEnabled, notePickPrompt, readQuickFillStrings } from '@/utils/quick-fill';
+import { checkTimeSync } from '@/utils/time-sync';
+import { isQuickFillEnabled, notePickPrompt } from '@/utils/quick-fill';
 import { getOpenMode } from '@/utils/open-mode';
 import { openAppFor } from './open-mode';
-import { createT, type TranslationKey } from '@/utils/i18n';
+import {
+  createT,
+  detectLanguage,
+  matchLanguage,
+  activateLanguageTable,
+  type Language,
+  type TranslationKey,
+} from '@/utils/i18n';
 import { quickFillInPage, type QuickFillOutcome } from './quick-fill-page';
+import { LANGUAGE_TABLES } from './locales';
 
 export const MENU_ID = 'quick-fill';
 export const COMMAND_ID = 'quick-fill';
@@ -35,29 +44,22 @@ const MIN_REMAINING_SEC = 2;
 type Translate = (key: TranslationKey, ...args: (string | number)[]) => string;
 
 /**
- * The four strings this worker shows, in the language the user picked.
+ * The language the user picked in the popup, not the browser's.
  *
- * Not loadLanguage. That reaches for a locale chunk with a dynamic import,
- * which a service worker does not allow outside its first evaluation, so it
- * rejected here every time and the menu item was English in all twenty
- * languages. The popup writes the strings down instead — see
- * utils/quick-fill.ts for why that rather than importing the tables.
- *
- * English is compiled in, so a key with nothing published for it falls back
- * rather than rendering as itself. That is the state a fresh install is in
- * until the app is opened once.
+ * Not `loadLanguage`: its dynamic import is refused in a service worker, and
+ * that refusal was the whole story of why the menu item and the in-page notices
+ * stayed English in every language. The tables are bundled here instead.
  */
 async function translator(): Promise<Translate> {
-  const published = await readQuickFillStrings();
-  const english = createT('en');
-  return (key, ...args) => {
-    const template = published[key as keyof typeof published];
-    if (!template) return english(key, ...args);
-    return args.reduce<string>(
-      (text, arg, index) => text.replace(`{${index}}`, () => String(arg)),
-      template
-    );
-  };
+  let language: Language = detectLanguage();
+  try {
+    const stored = (await chrome.storage.local.get('language')).language;
+    if (stored) language = matchLanguage(String(stored));
+  } catch {
+    // Preference unreadable — the detected language is still better than none.
+  }
+  activateLanguageTable(language, LANGUAGE_TABLES[language]);
+  return createT(language);
 }
 
 /**
@@ -131,7 +133,15 @@ export async function runQuickFill(invocation: Invocation): Promise<void> {
     return;
   }
 
+  // The stored correction alone is not enough. Quick fill never opened the
+  // popup, so nothing here ever measured the clock: a correction taken before
+  // the OS fixed it was filled into sign-in forms, as a confidently wrong code,
+  // for as long as the record lived. checkTimeSync answers from the cache while
+  // a measurement is recent — the common case, and free — and otherwise
+  // measures, costing at most its fetch timeout; a measurement that fails
+  // leaves the local clock in charge rather than an unvouched-for correction.
   await loadTimeOffset();
+  await checkTimeSync().catch(() => {});
   let totp = tryGenerateTOTP(account);
   if (totp && totp.remaining <= MIN_REMAINING_SEC) {
     await new Promise<void>(resolve => setTimeout(resolve, totp!.remaining * 1000 + 250));

@@ -91,6 +91,20 @@ export function detectLanguage(): Language {
 }
 
 /**
+ * The language a page opens in: the stored choice, else the browser's.
+ *
+ * Every page has to apply the same rule, and the passkey window did not — it
+ * followed the browser alone, so someone who had picked Russian in the popup of
+ * an English Chrome got an English window in the middle of an unlock. A stored
+ * value we do not ship (an older build's code, a hand-edited profile) counts as
+ * no choice rather than as a language nothing can render.
+ */
+export function resolveLanguage(stored: unknown): Language {
+  if (typeof stored === 'string' && SUPPORTED.has(stored)) return stored as Language;
+  return detectLanguage();
+}
+
+/**
  * Languages written right to left.
  *
  * Without `dir`, the document lays out left-to-right and Arabic gets a
@@ -152,6 +166,20 @@ export async function loadLanguage(language: Language): Promise<void> {
     // A missing or corrupt chunk must not blank the UI.
     console.error(`Failed to load translations for "${language}"`, error);
   }
+}
+
+/**
+ * Activate a table the caller already holds, without the dynamic import.
+ *
+ * For the service worker: Chrome refuses `import()` there outright
+ * ("import() is disallowed on ServiceWorkerGlobalScope"), so loadLanguage
+ * failed on every wake and the right-click item and the in-page notices were
+ * English for everyone. The worker imports its tables statically instead.
+ */
+export function activateLanguageTable(language: Language, strings: TranslationStrings): void {
+  loaded[language] = strings;
+  active = strings;
+  activeLanguage = language;
 }
 
 export function getActiveLanguage(): Language {

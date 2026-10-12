@@ -90,3 +90,52 @@ export async function stampNow(): Promise<number> {
     return now;
   }
 }
+
+/**
+ * A moment recorded twice: on the wall clock, and on the monotonic clock that
+ * nothing outside this page can move.
+ *
+ * `ageOf` catches a clock that moved backwards, because the stamp ends up in
+ * the future. It cannot catch one that moved FORWARDS — the stamp just looks
+ * old, or, for a jump smaller than whatever the caller waits for, perfectly
+ * current. That is the ordinary way a slow clock gets fixed: the user sees our
+ * warning, the OS syncs, and the wall clock steps ahead by exactly the drift we
+ * measured. Only a second clock that did not step can tell.
+ *
+ * The monotonic half means nothing outside the page that took it, so it is
+ * never stored; a stamp rebuilt from a stored wall time can only catch jumps
+ * that happen after it was rebuilt.
+ */
+export interface SteadyStamp {
+  wall: number;
+  mono: number | null;
+}
+
+function monotonicNow(): number | null {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : null;
+}
+
+/**
+ * Stamp "now" — or, given `ageMs`, a moment that long ago, for a measurement
+ * whose wall time was read back from storage.
+ */
+export function steadyStamp(ageMs = 0): SteadyStamp {
+  const mono = monotonicNow();
+  return { wall: Date.now() - ageMs, mono: mono === null ? null : mono - ageMs };
+}
+
+/**
+ * How long ago `stamp` was, or null when the wall clock has jumped since —
+ * either way, by more than `toleranceMs`.
+ *
+ * A laptop that slept reads as a jump too wherever the monotonic clock stops
+ * during sleep (it does on macOS). That is the direction to be wrong in: the
+ * caller throws away a measurement it could have kept, and takes a new one.
+ */
+export function steadyAgeOf(stamp: SteadyStamp, toleranceMs: number): number | null {
+  const age = ageOf(stamp.wall);
+  if (age === null) return null;
+  const mono = monotonicNow();
+  if (stamp.mono === null || mono === null) return age;
+  return Math.abs(age - (mono - stamp.mono)) <= toleranceMs ? age : null;
+}

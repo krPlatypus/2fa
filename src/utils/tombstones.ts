@@ -92,9 +92,14 @@ export async function markDeleted(identities: string[]): Promise<void> {
  * Forget any marker for an identity that is present again.
  *
  * Adding an account back — re-scanning the QR, restoring a backup — has to
- * work, and it is the only signal that says so. Called from saveAccounts, so
- * every path that writes accounts is covered by one line rather than each
- * remembering to do it.
+ * work, and it is the only signal that says so. Called from the one write path
+ * in storage.ts, so every way of adding is covered by one line rather than each
+ * remembering to do it — and called only with identities that write ADDS. A
+ * list that merely still held the account, written by another window between
+ * a delete's marker and the delete's own write, used to erase the marker here.
+ *
+ * Storage passes every spelling it records a deletion under (see
+ * tombstoneIdentities in storage.ts), so each is forgotten together.
  */
 export async function forgetDeleted(identities: string[]): Promise<void> {
   const tombstones = await read();

@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Check, Fingerprint, Lock } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { SupportFooter } from '@/components/SupportFooter';
-import { applyDocumentLanguage, createT, detectLanguage, loadLanguage, type Language } from '@/utils/i18n';
+import { applyDocumentLanguage, createT, loadLanguage, resolveLanguage, type Language } from '@/utils/i18n';
 import {
   evaluatePrf,
   isPasskeyApiAvailable,
@@ -62,10 +62,20 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const detected = await detectLanguage();
-      await loadLanguage(detected);
-      applyDocumentLanguage(detected);
-      setLanguage(detected);
+      // The same rule as every other page: the language picked in the popup
+      // wins, and only without one does the browser's decide. This window used
+      // the browser's alone, so it could open mid-unlock in a language the
+      // user had switched away from.
+      let stored: unknown;
+      try {
+        stored = (await chrome.storage.local.get('language')).language;
+      } catch {
+        // Unreadable storage is no choice made; the browser's language stands in.
+      }
+      const language = resolveLanguage(stored);
+      await loadLanguage(language);
+      applyDocumentLanguage(language);
+      setLanguage(language);
     })();
   }, []);
 

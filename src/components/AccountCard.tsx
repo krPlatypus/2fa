@@ -31,6 +31,10 @@ interface AccountCardProps {
   onDragStart?: (e: React.DragEvent, id: string) => void;
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent, id: string) => void;
+  /** The pointer left this row, so its drop marker must go. */
+  onDragLeave?: (id: string) => void;
+  /** The drag this row started is over — dropped anywhere, or cancelled with Esc. */
+  onDragEnd?: () => void;
   isDragOver?: boolean;
   currentDomain?: string | null;
   isSuggested?: boolean;
@@ -51,6 +55,8 @@ export function AccountCard({
   onDragStart,
   onDragOver,
   onDrop,
+  onDragLeave,
+  onDragEnd,
   isDragOver,
   currentDomain,
   isSuggested,
@@ -299,6 +305,19 @@ export function AccountCard({
     onDragStart: (e: React.DragEvent) => onDragStart?.(e, account.id),
     onDragOver: (e: React.DragEvent) => { e.preventDefault(); onDragOver?.(e); },
     onDrop: (e: React.DragEvent) => { e.preventDefault(); onDrop?.(e, account.id); },
+    // Without these two the blue line stayed on the last row the pointer
+    // crossed whenever the drag ended anywhere but on a row — outside the
+    // list, or cancelled with Esc — and sat there until the next drag.
+    //
+    // dragleave also fires when the pointer moves onto one of the row's own
+    // children, which would flicker the marker off and on; that case is not a
+    // leave.
+    onDragLeave: (e: React.DragEvent) => {
+      const next = e.relatedTarget as Node | null;
+      if (next && e.currentTarget.contains(next)) return;
+      onDragLeave?.(account.id);
+    },
+    onDragEnd: () => onDragEnd?.(),
   };
 
   const baseClass = `relative group group/copy overflow-hidden cursor-pointer bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${

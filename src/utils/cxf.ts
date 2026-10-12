@@ -25,6 +25,7 @@
 
 import type { Account } from '@/types';
 import { cleanSecret, isUsableSecret } from './totp';
+import { normalizeAlgorithm, normalizeDigits, normalizePeriod } from './import-formats';
 
 const CXF_VERSION = 1;
 const EXPORTER = 'authenticator.sh';
@@ -104,9 +105,15 @@ export function buildCxfFile(accounts: Account[]): string {
         {
           type: 'totp' as const,
           secret: cleanSecret(account.secret),
-          period: account.period,
-          digits: account.digits,
-          algorithm: account.algorithm.toLowerCase() as CxfAlgorithm,
+          // Repaired the way generation repairs them, not copied. A record
+          // imported from a file without these fields has none, and
+          // `undefined.toLowerCase()` turned "export" into "Export failed" for
+          // every account in the list, not just that one. What goes out must be
+          // what this app computes codes with, or the other side gets
+          // different codes from the same secret.
+          period: normalizePeriod(account.period),
+          digits: normalizeDigits(account.digits),
+          algorithm: normalizeAlgorithm(account.algorithm).toLowerCase() as CxfAlgorithm,
           username: account.name || undefined,
           issuer: account.issuer || undefined,
         },
@@ -129,38 +136,13 @@ export function isCxfFile(text: string): boolean {
   }
 }
 
-function normalizeAlgorithm(value: unknown): Account['algorithm'] {
-  const text = typeof value === 'string' ? value.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
-  if (text === 'SHA256') return 'SHA256';
-  if (text === 'SHA512') return 'SHA512';
-  // Anything else, including the absent field, is SHA-1: it is the default in
-  // RFC 6238 and what every issuer that does not say otherwise means. Guessing
-  // differently produces codes that are confidently wrong rather than absent.
-  return 'SHA1';
-}
-
-function normalizeDigits(value: unknown): number {
-  const digits = Number(value);
-  // 7 is issued in the wild; the range check mirrors types/index.ts, which
-  // deliberately does not narrow this to 6 | 8.
-  return Number.isInteger(digits) && digits >= 6 && digits <= 10 ? digits : 6;
-}
-
-function normalizePeriod(value: unknown): number {
-  const period = Number(value);
-  // The ceiling matches parsePeriod and safePeriod (3600). It used to be 300,
-  // which is below what the rest of the codebase accepts — so an account with a
-  // 600-second period, written by our own CXF export, was read back at 30 and
-  // produced a confidently wrong code. Our export, our importer, no warning.
-  return Number.isInteger(period) && period > 0 && period <= 3600 ? period : 30;
-}
-
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
 /**
- * Pull every TOTP credential out of a CXF document.
+ * Pull every TOTP credential out of a CXF document, and count the ones that
+ * could not be used.
  *
  * Tolerant on purpose, in both directions:
  * - one malformed item never costs the file. A person importing this has
@@ -168,11 +150,16 @@ function asText(value: unknown): string {
  *   how a migration becomes a data-loss event.
  * - only `secret` is irreplaceable. A missing title, username or issuer is
  *   filled in, never a reason to drop the row.
+ *
+ * Counted, not just dropped: a file whose every TOTP secret was unusable used
+ * to come back as an empty list, which the importer took for an empty file and
+ * reported as "Import successful!" with nothing added.
  */
-export function readCxfFile(text: string): Account[] {
+export function readCxf(text: string): { accounts: Account[]; unreadable: number } {
   const parsed = JSON.parse(text) as Partial<CxfDocument>;
   const items = Array.isArray(parsed.items) ? parsed.items : [];
   const accounts: Account[] = [];
+  let unreadable = 0;
 
   items.forEach((item, itemIndex) => {
     if (!item || typeof item !== 'object') return;
@@ -180,20 +167,31 @@ export function readCxfFile(text: string): Account[] {
 
     credentials.forEach((credential, credentialIndex) => {
       if (!credential || typeof credential !== 'object') return;
+      // Passwords, passkeys, notes: other credentials of the same login, not
+      // accounts we failed to read.
       if (asText((credential as CxfTotpCredential).type).toLowerCase() !== 'totp') return;
 
       const raw = credential as Partial<CxfTotpCredential>;
       const secret = cleanSecret(asText(raw.secret));
       // Not a judgement call: without a usable secret there is no account, and
       // storing one would render a permanently wrong code instead of failing.
-      if (!isUsableSecret(secret)) return;
+      if (!isUsableSecret(secret)) {
+        unreadable++;
+        return;
+      }
 
-      const issuer = asText(raw.issuer) || asText(item.title);
-      const name = asText(raw.username) || asText(item.subtitle) || issuer || 'Unknown';
+      const title = asText(item.title);
+      const name = asText(raw.username) || asText(item.subtitle);
+      // The title is the service name in other vendors' files, so it stands in
+      // for a missing issuer — but not when it merely repeats the account name.
+      // Our own export writes the name there when there is no issuer, because
+      // CXF wants a title on every item, and reading it back as the issuer
+      // turned "bob" with no issuer into "bob: bob".
+      const issuer = asText(raw.issuer) || (title !== name ? title : '');
 
       accounts.push({
         id: `cxf-${Date.now()}-${itemIndex}-${credentialIndex}-${Math.random().toString(36).slice(2, 8)}`,
-        name,
+        name: name || issuer || 'Unknown',
         issuer,
         secret,
         algorithm: normalizeAlgorithm(raw.algorithm),
@@ -207,7 +205,12 @@ export function readCxfFile(text: string): Account[] {
     });
   });
 
-  return accounts;
+  return { accounts, unreadable };
+}
+
+/** The usable accounts only. */
+export function readCxfFile(text: string): Account[] {
+  return readCxf(text).accounts;
 }
 
 export function cxfFileName(): string {

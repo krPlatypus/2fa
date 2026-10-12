@@ -64,8 +64,12 @@ export interface EncryptedAccount {
 /** What getAccounts reads and saveAccounts writes: plaintext or encrypted. */
 export type StoredAccount = Account | EncryptedAccount;
 
+/**
+ * Safe on anything, not only on what the type promises: storage has held a
+ * `null` in the account list, and asking it for `.enc` threw out of every read.
+ */
 export function isEncryptedAccount(record: StoredAccount): record is EncryptedAccount {
-  return typeof (record as EncryptedAccount).enc === 'string';
+  return !!record && typeof record === 'object' && typeof (record as EncryptedAccount).enc === 'string';
 }
 
 export interface TOTPCode {

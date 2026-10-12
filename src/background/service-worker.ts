@@ -3,7 +3,8 @@
 
 import { COMMAND_ID, MENU_ID, runQuickFill, syncContextMenu } from './quick-fill';
 import { applyOpenMode, registerOpenMode } from './open-mode';
-import { QUICK_FILL_ENABLED_KEY, QUICK_FILL_STRINGS_KEY } from '@/utils/quick-fill';
+import { QUICK_FILL_ENABLED_KEY } from '@/utils/quick-fill';
+import { restoreBadge, showUpdateBadge } from '@/utils/update-badge';
 
 // Hosted rather than bundled so the copy can be updated without shipping a new
 // extension version, and so the uninstall feedback survives the extension being
@@ -29,6 +30,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.storage.local.get('lastSeenWhatsNewVersion', (result) => {
       if (result.lastSeenWhatsNewVersion !== currentVersion) {
         chrome.storage.local.set({ pendingWhatsNew: currentVersion });
+        showUpdateBadge(currentVersion).catch(() => {});
       }
     });
   }
@@ -40,11 +42,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.runtime.onStartup.addListener(() => {
   void syncContextMenu();
   void applyOpenMode();
+  restoreBadge().catch(() => {});
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (QUICK_FILL_ENABLED_KEY in changes || QUICK_FILL_STRINGS_KEY in changes) void syncContextMenu();
+  if (QUICK_FILL_ENABLED_KEY in changes || 'language' in changes) void syncContextMenu();
 });
 
 // The "Open as" setting: popup, floating window or side panel. Its listeners
